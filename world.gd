@@ -28,6 +28,9 @@ func _ready() -> void:
 	cart.mass = 30.0
 	cart.linear_damp = 1.0
 	cart.angular_damp = 2.0
+	cart.center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
+	cart.center_of_mass = Vector3(0, 0, -0.5)
+	cart.set_script(load("res://cart.gd"))
 	cart.position = Vector3(0, 1, -5) # 5 meters in front of center
 	
 	var cart_mesh = MeshInstance3D.new()

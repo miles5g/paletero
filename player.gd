@@ -27,7 +27,7 @@ func _physics_process(delta: float) -> void:
 		var collision = get_slide_collision(i)
 		var body = collision.get_collider()
 
-		# If the thing we walk into is a RigidBody (The Cart), give it a push
+		# RigidBody carts (e.g. wheeled grip in cart.gd); impulse still drives net motion
 		if body is RigidBody3D:
 			var force_dir = -collision.get_normal()
 			body.apply_central_impulse(force_dir * velocity.length() * push_force)
