@@ -1,5 +1,150 @@
 extends Node3D
 
+## PS2-era floor read: tiny albedo so pixels fight the mesh, not crisp HD tiling.
+const FLOOR_ALBEDO_TEXTURE_RES: int = 256
+
+
+func _make_floor_grit_texture(noise_seed: int) -> ImageTexture:
+	var img := Image.create(FLOOR_ALBEDO_TEXTURE_RES, FLOOR_ALBEDO_TEXTURE_RES, false, Image.FORMAT_RGBA8)
+	var noise := FastNoiseLite.new()
+	noise.seed = noise_seed
+	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	noise.fractal_type = FastNoiseLite.FRACTAL_FBM
+	noise.fractal_octaves = 4
+	noise.fractal_gain = 0.52
+	noise.frequency = 0.055
+	for y in range(FLOOR_ALBEDO_TEXTURE_RES):
+		for x in range(FLOOR_ALBEDO_TEXTURE_RES):
+			var xf := float(x)
+			var yf := float(y)
+			var n := noise.get_noise_2d(xf, yf)
+			var n2 := noise.get_noise_2d(xf * 2.4 + 19.0, yf * 2.4 - 7.0)
+			var n3 := noise.get_noise_2d(xf * 0.31 + 3.0, yf * 0.31 + 11.0)
+			var v := 0.38 + n * 0.22 + n2 * 0.14 + n3 * 0.08
+			v = clampf(v, 0.0, 1.0)
+			img.set_pixel(x, y, Color(v, v, v * 1.02, 1.0))
+	var tex := ImageTexture.new()
+	tex.set_image(img)
+	return tex
+
+
+func _apply_floor_texture_rules(m: StandardMaterial3D, albedo_tex: Texture2D, uv_scale: Vector3) -> void:
+	m.albedo_texture = albedo_tex
+	m.uv1_scale = uv_scale
+	# No mip sampling + chunky texels (Godot 4 has no texture_mipmap_mode on BaseMaterial3D).
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+
+
+func _make_wet_asphalt_material(albedo_tex: Texture2D, uv_scale: Vector3) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.2, 0.21, 0.26)
+	_apply_floor_texture_rules(m, albedo_tex, uv_scale)
+	m.roughness = 0.1
+	m.metallic = 0.0
+	m.specular = 1.0
+	return m
+
+
+func _make_dark_concrete_material(albedo_tex: Texture2D, uv_scale: Vector3) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.28, 0.28, 0.29)
+	_apply_floor_texture_rules(m, albedo_tex, uv_scale)
+	m.roughness = 0.92
+	m.metallic = 0.0
+	m.specular = 0.32
+	return m
+
+
+func _make_curb_material(albedo_tex: Texture2D, uv_scale: Vector3) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.24, 0.24, 0.26)
+	_apply_floor_texture_rules(m, albedo_tex, uv_scale)
+	m.roughness = 0.88
+	m.metallic = 0.0
+	m.specular = 0.28
+	return m
+
+
+func _add_street_box(parent: Node3D, p_name: String, size: Vector3, center_pos: Vector3, mat: Material) -> void:
+	var body := StaticBody3D.new()
+	body.name = p_name
+	var mi := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = size
+	mi.mesh = box
+	mi.material_override = mat
+	var col := CollisionShape3D.new()
+	var sh := BoxShape3D.new()
+	sh.size = size
+	col.shape = sh
+	body.add_child(mi)
+	body.add_child(col)
+	body.position = center_pos
+	parent.add_child(body)
+
+
+## Long strip along Z: sidewalks + curbs + wet asphalt lane (player/cart stay near center).
+func _build_street_layout(root: Node3D) -> void:
+	var street_root := Node3D.new()
+	street_root.name = "Street"
+	root.add_child(street_root)
+	var tex_asphalt := _make_floor_grit_texture(0xA511A1)
+	var tex_walk := _make_floor_grit_texture(0x51DEA1)
+	var tex_curb := _make_floor_grit_texture(0xC0B4E)
+	# Tile the 256² maps so long boxes still show chunky texels (nearest filter).
+	var asphalt := _make_wet_asphalt_material(tex_asphalt, Vector3(52, 52, 52))
+	var concrete := _make_dark_concrete_material(tex_walk, Vector3(34, 34, 34))
+	var curb_mat := _make_curb_material(tex_curb, Vector3(10, 6, 120))
+	var street_len := 100.0
+	var street_half_w := 4.0
+	var curb_w := 0.22
+	var curb_h := 0.16
+	var sidewalk_w := 6.0
+	var slab_h := 0.2
+	# Top of flat surfaces at y = 0 (same as old ground feel).
+	var slab_y := -slab_h * 0.5
+	var z0 := 0.0
+	# Road
+	_add_street_box(
+		street_root,
+		"StreetAsphalt",
+		Vector3(street_half_w * 2.0, slab_h, street_len),
+		Vector3(0.0, slab_y, z0),
+		asphalt
+	)
+	var inner := street_half_w + curb_w * 0.5
+	# Left curb (thin, long; slight lip above slab read).
+	_add_street_box(
+		street_root,
+		"CurbLeft",
+		Vector3(curb_w, curb_h, street_len),
+		Vector3(-inner, curb_h * 0.5 - 0.02, z0),
+		curb_mat
+	)
+	_add_street_box(
+		street_root,
+		"CurbRight",
+		Vector3(curb_w, curb_h, street_len),
+		Vector3(inner, curb_h * 0.5 - 0.02, z0),
+		curb_mat
+	)
+	var walk_center_x := inner + curb_w * 0.5 + sidewalk_w * 0.5
+	_add_street_box(
+		street_root,
+		"SidewalkLeft",
+		Vector3(sidewalk_w, slab_h, street_len),
+		Vector3(-walk_center_x, slab_y, z0),
+		concrete
+	)
+	_add_street_box(
+		street_root,
+		"SidewalkRight",
+		Vector3(sidewalk_w, slab_h, street_len),
+		Vector3(walk_center_x, slab_y, z0),
+		concrete
+	)
+
+
 func _ready() -> void:
 	var hud := CanvasLayer.new()
 	hud.name = "HUD"
@@ -35,6 +180,14 @@ func _ready() -> void:
 	env.fog_density = 0.058
 	env.fog_sky_affect = 1.0
 	env.fog_aerial_perspective = 0.6
+	# Faint bloom so bright UI / spec hits read PS2-era against the dark grade.
+	env.glow_enabled = true
+	env.glow_intensity = 0.28
+	env.glow_strength = 0.85
+	env.glow_bloom = 0.12
+	env.glow_hdr_threshold = 0.78
+	env.glow_hdr_scale = 0.88
+	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
 	world_env.environment = env
 	add_child(world_env)
 
@@ -47,26 +200,8 @@ func _ready() -> void:
 	sun.rotation_degrees = Vector3(-45, 45, 0)
 	add_child(sun)
 
-	# 2. Build the Ground
-	var ground = StaticBody3D.new()
-	var ground_mesh = MeshInstance3D.new()
-	ground_mesh.mesh = PlaneMesh.new()
-	ground_mesh.mesh.size = Vector2(50, 50)
-	var wet_asphalt := StandardMaterial3D.new()
-	# Tiny lift so ambient + spec catch “wet” read instead of pure ink.
-	wet_asphalt.albedo_color = Color(0.075, 0.078, 0.095)
-	wet_asphalt.roughness = 0.1
-	wet_asphalt.metallic = 0.0
-	wet_asphalt.specular = 1.0
-	ground_mesh.material_override = wet_asphalt
-	
-	var ground_col = CollisionShape3D.new()
-	ground_col.shape = BoxShape3D.new()
-	ground_col.shape.size = Vector3(50, 1, 50)
-	
-	ground.add_child(ground_mesh)
-	ground.add_child(ground_col)
-	add_child(ground)
+	# 2. Street layout: asphalt lane + curbs + sidewalk slabs (procedural StaticBodies).
+	_build_street_layout(self)
 
 	# 3. Spawn the Cart (RigidBody3D)
 	var cart = RigidBody3D.new()
