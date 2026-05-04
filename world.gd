@@ -18,9 +18,31 @@ func _ready() -> void:
 	interaction_label.offset_bottom = -12.0
 	add_child(hud)
 
+	# Gritty world mood: dark overcast sky + dense fog.
+	var world_env := WorldEnvironment.new()
+	world_env.name = "WorldEnvironment"
+	var env := Environment.new()
+	env.background_mode = Environment.BG_COLOR
+	# Slightly lifted from true black so distant silhouettes read against “overcast void.”
+	env.background_color = Color(0.065, 0.07, 0.088)
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	# Faint deep blue-grey fill: enough to read floor grit in shadow, still hostile.
+	env.ambient_light_color = Color(0.14, 0.15, 0.22)
+	env.ambient_light_energy = 1.22
+	env.fog_enabled = true
+	env.fog_light_color = Color(0.22, 0.23, 0.28)
+	# Claustrophobic visibility: most scene detail fades by ~15–20m; slightly softer near camera.
+	env.fog_density = 0.058
+	env.fog_sky_affect = 1.0
+	env.fog_aerial_perspective = 0.6
+	world_env.environment = env
+	add_child(world_env)
+
 	# 1. Create the Sun
 	var sun = DirectionalLight3D.new()
 	sun.shadow_enabled = true
+	sun.light_energy = 0.62
+	sun.light_color = Color(0.58, 0.62, 0.72)
 	sun.position = Vector3(0, 10, 0)
 	sun.rotation_degrees = Vector3(-45, 45, 0)
 	add_child(sun)
@@ -30,6 +52,13 @@ func _ready() -> void:
 	var ground_mesh = MeshInstance3D.new()
 	ground_mesh.mesh = PlaneMesh.new()
 	ground_mesh.mesh.size = Vector2(50, 50)
+	var wet_asphalt := StandardMaterial3D.new()
+	# Tiny lift so ambient + spec catch “wet” read instead of pure ink.
+	wet_asphalt.albedo_color = Color(0.075, 0.078, 0.095)
+	wet_asphalt.roughness = 0.1
+	wet_asphalt.metallic = 0.0
+	wet_asphalt.specular = 1.0
+	ground_mesh.material_override = wet_asphalt
 	
 	var ground_col = CollisionShape3D.new()
 	ground_col.shape = BoxShape3D.new()
