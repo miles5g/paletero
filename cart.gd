@@ -2,9 +2,9 @@ extends RigidBody3D
 
 ## Local X is treated as sideways slide; multiply by this each physics step (0.1 ~= 90% reduction).
 @export var sideways_velocity_retention: float = 0.1
-## Yaw torque so cart local -Z faces horizontally away from the player (front “outward”).
-@export var front_yaw_strength: float = 42.0
-@export var front_yaw_max_impulse: float = 9.0
+## While grabbed: yaw cart so local -Z matches camera look on the ground (outward from camera).
+@export var front_yaw_strength: float = 48.0
+@export var front_yaw_max_impulse: float = 11.0
 
 var _handle_zone: Area3D
 var _interaction_area: Area3D
@@ -86,26 +86,35 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	var local_v: Vector3 = state.transform.basis.inverse() * state.linear_velocity
 	local_v.x *= sideways_velocity_retention
 	state.linear_velocity = state.transform.basis * local_v
-	_steer_cart_front_away_from_player(state)
+	_steer_cart_front_to_camera_look(state)
 
-func _steer_cart_front_away_from_player(state: PhysicsDirectBodyState3D) -> void:
+func _steer_cart_front_to_camera_look(state: PhysicsDirectBodyState3D) -> void:
 	var w := get_parent()
 	if w == null:
 		return
-	var player := w.get_node_or_null("Player") as Node3D
+	var player := w.get_node_or_null("Player") as CharacterBody3D
 	if player == null:
 		return
-	var away := state.transform.origin - player.global_position
-	away.y = 0.0
-	if away.length_squared() < 0.04:
+	if not player.is_pushing or player.current_cart != self:
 		return
-	away = away.normalized()
+	var cam: Camera3D = null
+	for c in player.get_children():
+		if c is Camera3D:
+			cam = c
+			break
+	if cam == null:
+		return
+	var want := -cam.global_transform.basis.z
+	want.y = 0.0
+	if want.length_squared() < 1e-5:
+		return
+	want = want.normalized()
 	var fwd := -state.transform.basis.z
 	fwd.y = 0.0
-	if fwd.length_squared() < 0.01:
+	if fwd.length_squared() < 1e-5:
 		return
 	fwd = fwd.normalized()
-	var angle := fwd.signed_angle_to(away, Vector3.UP)
+	var angle := fwd.signed_angle_to(want, Vector3.UP)
 	if absf(angle) < 0.02:
 		return
 	var impulse := clampf(angle * front_yaw_strength * _physics_dt, -front_yaw_max_impulse, front_yaw_max_impulse)

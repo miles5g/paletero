@@ -4,13 +4,14 @@ const BASE_SPEED: float = 4.0
 const SPRINT_SPEED: float = BASE_SPEED * 1.6
 const CROUCH_SPEED: float = BASE_SPEED * 0.5
 const JUMP_VELOCITY: float = 4.5
-const PUSH_MOVE_SPEED_CAP: float = 2.0
+## Max walk speed while hitched (higher than old cap so pushing feels brisk).
+const PUSH_MOVE_SPEED_CAP: float = 6.2
 
 @export var push_force: float = 2.0
 @export var mouse_sensitivity: float = 0.0025
 ## Virtual hitch: pulls cart toward a point in front of the player (CharacterBody3D + Jolt).
-@export var hitch_spring: float = 1800.0
-@export var hitch_damping: float = 95.0
+@export var hitch_spring: float = 1150.0
+@export var hitch_damping: float = 72.0
 ## Vertical pull vs horizontal (so cart can wobble on the ground without fighting XZ).
 @export var hitch_vertical_spring: float = 520.0
 ## How fast the hitch “looks” direction catches your facing (lower = more lag after fast 180° turns).

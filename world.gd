@@ -42,10 +42,11 @@ func _ready() -> void:
 	# 3. Spawn the Cart (RigidBody3D)
 	var cart = RigidBody3D.new()
 	cart.name = "Cart"
-	cart.mass = 30.0
-	cart.linear_damp = 1.2
-	# Resist tipping; COM low in local space = bottom-heavy (still tips on steep slopes).
-	cart.angular_damp = 7.5
+	cart.mass = 12.0
+	cart.linear_damp = 0.45
+	cart.gravity_scale = 0.82
+	# Lighter cart: less angular drag so it feels a bit floatier while still settling.
+	cart.angular_damp = 3.8
 	cart.center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
 	# Box is 1m tall centered at origin: put mass well below center, slightly toward the rear wheels.
 	cart.center_of_mass = Vector3(0.0, -0.44, -0.18)
