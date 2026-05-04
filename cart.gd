@@ -2,9 +2,13 @@ extends RigidBody3D
 
 ## Local X is treated as sideways slide; multiply by this each physics step (0.1 ~= 90% reduction).
 @export var sideways_velocity_retention: float = 0.1
+## Yaw torque so cart local -Z faces horizontally away from the player (front “outward”).
+@export var front_yaw_strength: float = 42.0
+@export var front_yaw_max_impulse: float = 9.0
 
 var _handle_zone: Area3D
 var _interaction_area: Area3D
+var _physics_dt: float = 1.0 / 60.0
 
 func _ready() -> void:
 	add_to_group("carts")
@@ -41,6 +45,9 @@ func _ready() -> void:
 	_interaction_area.body_entered.connect(_on_interaction_area_body_entered)
 	_interaction_area.body_exited.connect(_on_interaction_area_body_exited)
 	call_deferred("_sync_area_masks_to_player_layer")
+
+func _physics_process(delta: float) -> void:
+	_physics_dt = delta
 
 func _sync_area_masks_to_player_layer() -> void:
 	var w := get_parent()
@@ -79,6 +86,30 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	var local_v: Vector3 = state.transform.basis.inverse() * state.linear_velocity
 	local_v.x *= sideways_velocity_retention
 	state.linear_velocity = state.transform.basis * local_v
+	_steer_cart_front_away_from_player(state)
+
+func _steer_cart_front_away_from_player(state: PhysicsDirectBodyState3D) -> void:
+	var w := get_parent()
+	if w == null:
+		return
+	var player := w.get_node_or_null("Player") as Node3D
+	if player == null:
+		return
+	var away := state.transform.origin - player.global_position
+	away.y = 0.0
+	if away.length_squared() < 0.04:
+		return
+	away = away.normalized()
+	var fwd := -state.transform.basis.z
+	fwd.y = 0.0
+	if fwd.length_squared() < 0.01:
+		return
+	fwd = fwd.normalized()
+	var angle := fwd.signed_angle_to(away, Vector3.UP)
+	if absf(angle) < 0.02:
+		return
+	var impulse := clampf(angle * front_yaw_strength * _physics_dt, -front_yaw_max_impulse, front_yaw_max_impulse)
+	state.apply_torque_impulse(Vector3.UP * impulse)
 
 func is_player_in_handle_zone(player: CharacterBody3D) -> bool:
 	if _handle_zone == null:

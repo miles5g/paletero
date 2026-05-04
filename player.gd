@@ -8,15 +8,24 @@ const PUSH_MOVE_SPEED_CAP: float = 2.0
 
 @export var push_force: float = 2.0
 @export var mouse_sensitivity: float = 0.0025
-## Virtual hitch: pulls cart toward the anchor relative to the player (works with CharacterBody3D + Jolt).
-@export var hitch_spring: float = 2200.0
+## Virtual hitch: pulls cart toward a point in front of the player (CharacterBody3D + Jolt).
+@export var hitch_spring: float = 1800.0
 @export var hitch_damping: float = 95.0
+## Vertical pull vs horizontal (so cart can wobble on the ground without fighting XZ).
+@export var hitch_vertical_spring: float = 520.0
+## How fast the hitch “looks” direction catches your facing (lower = more lag after fast 180° turns).
+@export var hitch_forward_track: float = 4.5
+## Small sideways oscillation of the target (meters).
+@export var hitch_wobble_amplitude: float = 0.06
 var gravity = ProjectSettings.get_setting("physics/3d/default_gravity")
 
 var is_pushing: bool = false
 var current_cart: RigidBody3D = null
-## Cart center relative to player in player-local axes (XZ follow, Y keeps height relationship).
-var _hitch_cart_local: Vector3 = Vector3.ZERO
+var _hitch_distance: float = 2.0
+## Smoothed horizontal forward used for “in front” target (lags body/camera yaw).
+var _hitch_forward_smooth: Vector3 = Vector3.ZERO
+## Cart Y offset from player at grab (preserves relative height).
+var _hitch_dy: float = 0.0
 var can_interact: bool = false
 
 var _mesh_instance: MeshInstance3D
@@ -26,6 +35,8 @@ var _capsule_shape: CapsuleShape3D
 var _stand_mesh_height: float
 var _stand_shape_height: float
 var _camera: Camera3D
+var _push_arm_l: MeshInstance3D = null
+var _push_arm_r: MeshInstance3D = null
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -95,7 +106,8 @@ func _physics_process(delta: float) -> void:
 
 	if is_pushing and current_cart != null:
 		current_cart.sleeping = false
-		_apply_hitch_forces()
+		_apply_hitch_forces(delta)
+		_update_push_arms_visual()
 
 	for i in get_slide_collision_count():
 		var collision = get_slide_collision(i)
@@ -122,21 +134,118 @@ func _attach_to_cart(cart: RigidBody3D) -> void:
 	current_cart = cart
 	is_pushing = true
 	add_collision_exception_with(cart)
-	_hitch_cart_local = global_transform.basis.inverse() * (cart.global_position - global_position)
+	var to_cart_xz := cart.global_position - global_position
+	to_cart_xz.y = 0.0
+	_hitch_distance = clampf(to_cart_xz.length(), 1.35, 3.4)
+	_hitch_dy = cart.global_position.y - global_position.y
+	var face := -global_transform.basis.z
+	face.y = 0.0
+	if face.length_squared() < 1e-5:
+		face = Vector3(0, 0, -1)
+	_hitch_forward_smooth = face.normalized()
 	cart.freeze = false
 	cart.sleeping = false
 	cart.can_sleep = false
+	_create_push_arms()
 
-func _apply_hitch_forces() -> void:
+func _new_push_arm_mesh(arm_name: String) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	mi.name = arm_name
+	var cyl := CylinderMesh.new()
+	cyl.height = 1.0
+	cyl.top_radius = 0.048
+	cyl.bottom_radius = 0.048
+	cyl.radial_segments = 10
+	mi.mesh = cyl
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.7, 0.52, 0.42)
+	mat.roughness = 0.9
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	return mi
+
+func _create_push_arms() -> void:
+	_destroy_push_arms()
+	_push_arm_l = _new_push_arm_mesh("PushArmL")
+	_push_arm_r = _new_push_arm_mesh("PushArmR")
+	add_child(_push_arm_l)
+	add_child(_push_arm_r)
+
+func _destroy_push_arms() -> void:
+	if _push_arm_l != null and is_instance_valid(_push_arm_l):
+		_push_arm_l.queue_free()
+	if _push_arm_r != null and is_instance_valid(_push_arm_r):
+		_push_arm_r.queue_free()
+	_push_arm_l = null
+	_push_arm_r = null
+
+func _stretch_arm_between(mi: MeshInstance3D, from: Vector3, to: Vector3) -> void:
+	var dir := to - from
+	var h := dir.length()
+	var cyl := mi.mesh as CylinderMesh
+	if h < 0.02:
+		mi.visible = false
+		return
+	mi.visible = true
+	cyl.height = h
+	var y_axis := dir / h
+	var x_axis := y_axis.cross(global_transform.basis.z)
+	if x_axis.length_squared() < 1e-6:
+		x_axis = y_axis.cross(global_transform.basis.x)
+	if x_axis.length_squared() < 1e-6:
+		x_axis = Vector3.RIGHT
+	x_axis = x_axis.normalized()
+	var z_axis := x_axis.cross(y_axis).normalized()
+	x_axis = y_axis.cross(z_axis).normalized()
+	mi.global_position = from + dir * 0.5
+	mi.global_basis = Basis(x_axis, y_axis, z_axis)
+
+func _update_push_arms_visual() -> void:
 	if current_cart == null or not is_instance_valid(current_cart):
 		return
-	var desired := global_position + global_transform.basis * _hitch_cart_local
+	if _push_arm_l == null or _push_arm_r == null:
+		return
+	var b := global_transform.basis
+	var left_shoulder := global_position + b * Vector3(-0.42, 0.92, 0.08)
+	var right_shoulder := global_position + b * Vector3(0.42, 0.92, 0.08)
+	var handle_gp: Vector3
+	var hz := current_cart.get_node_or_null("HandleZone") as Node3D
+	if hz != null and hz.is_inside_tree():
+		handle_gp = hz.global_position
+	else:
+		var cb := current_cart.global_transform.basis
+		handle_gp = current_cart.global_position + cb * Vector3(0.0, 0.45, 0.75)
+	_stretch_arm_between(_push_arm_l, left_shoulder, handle_gp)
+	_stretch_arm_between(_push_arm_r, right_shoulder, handle_gp)
+
+func _apply_hitch_forces(delta: float) -> void:
+	if current_cart == null or not is_instance_valid(current_cart):
+		return
+	var face := -global_transform.basis.z
+	face.y = 0.0
+	if face.length_squared() < 1e-5:
+		face = _hitch_forward_smooth
+	face = face.normalized()
+	var alpha := 1.0 - exp(-hitch_forward_track * delta)
+	_hitch_forward_smooth = _hitch_forward_smooth.lerp(face, alpha)
+	if _hitch_forward_smooth.length_squared() < 1e-5:
+		_hitch_forward_smooth = face
+	else:
+		_hitch_forward_smooth = _hitch_forward_smooth.normalized()
+	var right := Vector3(-_hitch_forward_smooth.z, 0.0, _hitch_forward_smooth.x).normalized()
+	var wob := sin(Time.get_ticks_msec() * 0.0017) * hitch_wobble_amplitude
+	var target_xz := global_position + _hitch_forward_smooth * _hitch_distance + right * wob
+	var desired := Vector3(target_xz.x, global_position.y + _hitch_dy, target_xz.z)
 	var err: Vector3 = desired - current_cart.global_position
 	var v := current_cart.linear_velocity
-	var damp := Vector3(v.x, 0.0, v.z) * hitch_damping
-	current_cart.apply_central_force(err * hitch_spring - damp)
+	var damp_h := Vector3(v.x, 0.0, v.z) * hitch_damping
+	var damp_v := Vector3(0.0, v.y, 0.0) * hitch_damping * 0.35
+	current_cart.apply_central_force(
+		Vector3(err.x, 0.0, err.z) * hitch_spring + Vector3(0.0, err.y, 0.0) * hitch_vertical_spring - damp_h - damp_v
+	)
 
 func _detach_from_cart() -> void:
+	_destroy_push_arms()
 	var cart := current_cart
 	if cart != null:
 		cart.can_sleep = true

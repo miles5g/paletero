@@ -43,10 +43,12 @@ func _ready() -> void:
 	var cart = RigidBody3D.new()
 	cart.name = "Cart"
 	cart.mass = 30.0
-	cart.linear_damp = 1.0
-	cart.angular_damp = 2.0
+	cart.linear_damp = 1.2
+	# Resist tipping; COM low in local space = bottom-heavy (still tips on steep slopes).
+	cart.angular_damp = 7.5
 	cart.center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
-	cart.center_of_mass = Vector3(0, 0, -0.5)
+	# Box is 1m tall centered at origin: put mass well below center, slightly toward the rear wheels.
+	cart.center_of_mass = Vector3(0.0, -0.44, -0.18)
 	cart.set_script(load("res://cart.gd"))
 	cart.position = Vector3(0, 1, -5) # 5 meters in front of center
 	
