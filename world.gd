@@ -1,6 +1,23 @@
 extends Node3D
 
 func _ready() -> void:
+	var hud := CanvasLayer.new()
+	hud.name = "HUD"
+	var interaction_label := Label.new()
+	interaction_label.name = "InteractionLabel"
+	interaction_label.text = "[E] Grab Cart"
+	interaction_label.visible = false
+	interaction_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	interaction_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	hud.add_child(interaction_label)
+	interaction_label.anchor_left = 0.0
+	interaction_label.anchor_right = 1.0
+	interaction_label.anchor_top = 1.0
+	interaction_label.anchor_bottom = 1.0
+	interaction_label.offset_top = -52.0
+	interaction_label.offset_bottom = -12.0
+	add_child(hud)
+
 	# 1. Create the Sun
 	var sun = DirectionalLight3D.new()
 	sun.shadow_enabled = true
@@ -44,6 +61,10 @@ func _ready() -> void:
 	cart.add_child(cart_mesh)
 	cart.add_child(cart_col)
 	add_child(cart)
+	# InteractionArea lives on cart script; place on +Z local side facing player spawn (0,*,0) vs cart at z=-5.
+	var interaction_area := cart.get_node_or_null("InteractionArea") as Area3D
+	if interaction_area:
+		interaction_area.position = Vector3(0, 0, 0.75)
 
 	# 4. Spawn the Player
 	_spawn_player()
@@ -52,6 +73,8 @@ func _spawn_player() -> void:
 	var player = CharacterBody3D.new()
 	player.name = "Player"
 	player.position = Vector3(0, 1, 0)
+	player.collision_layer = 1
+	player.collision_mask = 1
 	
 	# Give the player a script (we will create this file next)
 	player.set_script(load("res://player.gd"))
