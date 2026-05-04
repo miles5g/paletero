@@ -10,14 +10,18 @@ const PUSH_MOVE_SPEED_CAP: float = 6.2
 @export var push_force: float = 2.0
 @export var mouse_sensitivity: float = 0.0025
 ## Virtual hitch: pulls cart toward a point in front of the player (CharacterBody3D + Jolt).
-@export var hitch_spring: float = 1150.0
-@export var hitch_damping: float = 72.0
-## Vertical pull vs horizontal (so cart can wobble on the ground without fighting XZ).
-@export var hitch_vertical_spring: float = 520.0
-## How fast the hitch “looks” direction catches your facing (lower = more lag after fast 180° turns).
-@export var hitch_forward_track: float = 4.5
-## Small sideways oscillation of the target (meters).
-@export var hitch_wobble_amplitude: float = 0.06
+@export var hitch_spring: float = 2650.0
+@export var hitch_damping: float = 118.0
+## Vertical pull vs horizontal (stiffer Y keeps the hitch from sagging visually).
+@export var hitch_vertical_spring: float = 1100.0
+## How fast the hitch “looks” direction catches your facing (higher = stiffer in front).
+@export var hitch_forward_track: float = 14.0
+## Sideways oscillation of the target (meters); 0 = rigid arms / fixed line.
+@export var hitch_wobble_amplitude: float = 0.0
+## World-space distance from player to hitch target on the ground (fixed while grabbed).
+@export var hitch_nominal_distance: float = 2.05
+## Extra XZ force toward player horizontal velocity (tighter “rope” when starting/stopping).
+@export var hitch_velocity_match: float = 58.0
 var gravity = ProjectSettings.get_setting("physics/3d/default_gravity")
 
 var is_pushing: bool = false
@@ -135,9 +139,7 @@ func _attach_to_cart(cart: RigidBody3D) -> void:
 	current_cart = cart
 	is_pushing = true
 	add_collision_exception_with(cart)
-	var to_cart_xz := cart.global_position - global_position
-	to_cart_xz.y = 0.0
-	_hitch_distance = clampf(to_cart_xz.length(), 1.35, 3.4)
+	_hitch_distance = hitch_nominal_distance
 	_hitch_dy = cart.global_position.y - global_position.y
 	var face := -global_transform.basis.z
 	face.y = 0.0
@@ -154,8 +156,8 @@ func _new_push_arm_mesh(arm_name: String) -> MeshInstance3D:
 	mi.name = arm_name
 	var cyl := CylinderMesh.new()
 	cyl.height = 1.0
-	cyl.top_radius = 0.048
-	cyl.bottom_radius = 0.048
+	cyl.top_radius = 0.058
+	cyl.bottom_radius = 0.058
 	cyl.radial_segments = 10
 	mi.mesh = cyl
 	var mat := StandardMaterial3D.new()
@@ -240,9 +242,16 @@ func _apply_hitch_forces(delta: float) -> void:
 	var err: Vector3 = desired - current_cart.global_position
 	var v := current_cart.linear_velocity
 	var damp_h := Vector3(v.x, 0.0, v.z) * hitch_damping
-	var damp_v := Vector3(0.0, v.y, 0.0) * hitch_damping * 0.35
+	var damp_v := Vector3(0.0, v.y, 0.0) * hitch_damping * 0.42
+	var v_cart_xz := Vector3(v.x, 0.0, v.z)
+	var v_player_xz := Vector3(velocity.x, 0.0, velocity.z)
+	var match_xz := (v_player_xz - v_cart_xz) * hitch_velocity_match
 	current_cart.apply_central_force(
-		Vector3(err.x, 0.0, err.z) * hitch_spring + Vector3(0.0, err.y, 0.0) * hitch_vertical_spring - damp_h - damp_v
+		Vector3(err.x, 0.0, err.z) * hitch_spring
+		+ Vector3(0.0, err.y, 0.0) * hitch_vertical_spring
+		+ Vector3(match_xz.x, 0.0, match_xz.z)
+		- damp_h
+		- damp_v
 	)
 
 func _detach_from_cart() -> void:
