@@ -1,17 +1,17 @@
 # EL PALETERO - CURSOR AI DIRECTIVES
-# CRITICAL: This project uses GODOT 4.x and GDScript.
+# CRITICAL: This project uses GODOT 4.x and GDScript. 
 
 1. NO GODOT 3 SYNTAX:
 - Never use KinematicBody3D (Use CharacterBody3D).
 - Never use Spatial (Use Node3D).
 - Never use `export var` (Use `@export var`).
 - Never use `onready var` (Use `@onready var`).
-- Never use `move_and_slide()` with arguments (Godot 4 uses parameterless `move_and_slide()` and reads `velocity`).
+- Never use `move_and_slide()` with arguments (Godot 4 uses parameterless `move_and_slide()`).
 
 2. ZERO HALLUCINATION POLICY:
 - Do not invent nodes, functions, or auto-loads that have not been explicitly defined in the conversation.
 - If a method or property is required but you are unsure if it exists in Godot 4, STOP and ask the user to verify.
 
 3. ARCHITECTURE:
-- Keep scripts modular. Do not write monolithic Godot scripts.
-- Rely on Godot's built-in physics engine (RigidBody3D) rather than manual kinematic math whenever possible.
+- Keep scripts modular. No monolithic scripts.
+- Rely on Godot's built-in physics engine (RigidBody3D) rather than manual kinematic math for object interactions.
