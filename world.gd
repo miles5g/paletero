@@ -207,10 +207,13 @@ func _ready() -> void:
 	var cart = RigidBody3D.new()
 	cart.name = "Cart"
 	cart.mass = 12.0
-	cart.linear_damp = 0.45
-	cart.gravity_scale = 0.82
+	cart.linear_damp = 0.3
+	cart.gravity_scale = 0.72
 	# Lighter cart: less angular drag so it feels a bit floatier while still settling.
-	cart.angular_damp = 3.8
+	cart.angular_damp = 4.8
+	cart.physics_material_override = PhysicsMaterial.new()
+	cart.physics_material_override.friction = 0.18
+	cart.physics_material_override.bounce = 0.08
 	cart.center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
 	# Box is 1m tall centered at origin: put mass well below center, slightly toward the rear wheels.
 	cart.center_of_mass = Vector3(0.0, -0.44, -0.18)
@@ -220,13 +223,23 @@ func _ready() -> void:
 	var cart_mesh = MeshInstance3D.new()
 	cart_mesh.mesh = BoxMesh.new()
 	cart_mesh.mesh.size = Vector3(1, 1, 1.5)
+	cart_mesh.position.y = 0.16
 	
 	var cart_col = CollisionShape3D.new()
 	cart_col.shape = BoxShape3D.new()
-	cart_col.shape.size = Vector3(1, 1, 1.5)
+	# Smaller + raised hull = better curb/speed-bump clearance without changing visible cart size.
+	cart_col.shape.size = Vector3(1, 0.72, 1.5)
+	cart_col.position.y = 0.24
+	# Front ramp collider: acts like chunky front tires for head-on curb climbing.
+	var front_bump_col = CollisionShape3D.new()
+	front_bump_col.shape = BoxShape3D.new()
+	front_bump_col.shape.size = Vector3(0.86, 0.18, 0.34)
+	front_bump_col.position = Vector3(0.0, 0.05, -0.74)
+	front_bump_col.rotation.x = deg_to_rad(28.0)
 	
 	cart.add_child(cart_mesh)
 	cart.add_child(cart_col)
+	cart.add_child(front_bump_col)
 	add_child(cart)
 	# InteractionArea lives on cart script; place on +Z local side facing player spawn (0,*,0) vs cart at z=-5.
 	var interaction_area := cart.get_node_or_null("InteractionArea") as Area3D

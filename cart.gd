@@ -3,12 +3,25 @@ extends RigidBody3D
 ## Local X is treated as sideways slide; multiply by this each physics step (0.1 ~= 90% reduction).
 @export var sideways_velocity_retention: float = 0.1
 ## While grabbed: yaw cart so local -Z matches camera look on the ground (outward from camera).
-@export var front_yaw_strength: float = 48.0
-@export var front_yaw_max_impulse: float = 11.0
+@export var front_yaw_strength: float = 82.0
+@export var front_yaw_max_impulse: float = 18.0
+## Resist rapid yaw spin during camera flicks.
+@export var yaw_angular_damping: float = 6.5
+## Upward assist while grabbed (helps glide over curbs/small rocks instead of hard-stopping).
+@export var bump_float_force: float = 28.0
+## Reference forward speed for full float assist; higher = less lift at normal speeds.
+@export var bump_float_speed_ref: float = 8.0
+## Damp roll/pitch angular velocity so curb hits do not flip as aggressively.
+@export var anti_flip_damping: float = 8.0
+## Extra downward hold while grounded and grabbed (prevents hover on camera flicks).
+@export var grounded_hold_force: float = 34.0
+## Limits sudden yaw impulse jumps from fast camera snaps.
+@export var max_yaw_impulse_step: float = 3.8
 
 var _handle_zone: Area3D
 var _interaction_area: Area3D
 var _physics_dt: float = 1.0 / 60.0
+var _last_yaw_impulse: float = 0.0
 
 func _ready() -> void:
 	add_to_group("carts")
@@ -69,6 +82,8 @@ func _hud_interaction_label() -> Label:
 func _on_interaction_area_body_entered(body: Node3D) -> void:
 	if not body is CharacterBody3D or body.name != &"Player":
 		return
+	if body.is_pushing:
+		return
 	body.can_interact = true
 	var lbl := _hud_interaction_label()
 	if lbl:
@@ -87,15 +102,51 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	local_v.x *= sideways_velocity_retention
 	state.linear_velocity = state.transform.basis * local_v
 	_steer_cart_front_to_camera_look(state)
+	_apply_bump_float_and_stability(state)
 
-func _steer_cart_front_to_camera_look(state: PhysicsDirectBodyState3D) -> void:
+func _grabber_player() -> CharacterBody3D:
 	var w := get_parent()
 	if w == null:
-		return
+		return null
 	var player := w.get_node_or_null("Player") as CharacterBody3D
 	if player == null:
-		return
+		return null
 	if not player.is_pushing or player.current_cart != self:
+		return null
+	return player
+
+func _apply_bump_float_and_stability(state: PhysicsDirectBodyState3D) -> void:
+	var player := _grabber_player()
+	if player == null:
+		return
+	var fwd := -state.transform.basis.z
+	fwd.y = 0.0
+	if fwd.length_squared() < 1e-5:
+		return
+	fwd = fwd.normalized()
+	# Only assist while actually contacting geometry; prevents camera-turn induced airtime.
+	if state.get_contact_count() <= 0:
+		return
+	var forward_speed := maxf(0.0, state.linear_velocity.dot(fwd))
+	var up_assist := bump_float_force * clampf(forward_speed / bump_float_speed_ref, 0.0, 1.0)
+	# Don't keep boosting when already moving upward quickly.
+	if state.linear_velocity.y > 0.7:
+		up_assist *= 0.25
+	state.apply_central_force(Vector3.UP * up_assist)
+	# Keep contact with ground during fast turns; disabled when airborne so drops feel natural.
+	var hold := grounded_hold_force
+	if state.linear_velocity.y > 0.0:
+		hold += state.linear_velocity.y * 18.0
+	state.apply_central_force(Vector3.DOWN * hold)
+	var av := state.angular_velocity
+	# Counter roll/pitch spin from abrupt curb contacts while still allowing yaw steering.
+	state.apply_torque(Vector3(-av.x, 0.0, -av.z) * anti_flip_damping)
+	# Dampen pure yaw spin so camera flicks don't slingshot the cart sideways.
+	state.apply_torque(Vector3.UP * (-av.y * yaw_angular_damping))
+
+func _steer_cart_front_to_camera_look(state: PhysicsDirectBodyState3D) -> void:
+	var player := _grabber_player()
+	if player == null:
 		return
 	var cam: Camera3D = null
 	for c in player.get_children():
@@ -118,6 +169,14 @@ func _steer_cart_front_to_camera_look(state: PhysicsDirectBodyState3D) -> void:
 	if absf(angle) < 0.02:
 		return
 	var impulse := clampf(angle * front_yaw_strength * _physics_dt, -front_yaw_max_impulse, front_yaw_max_impulse)
+	# Extra snap when very misaligned (quick turns), keeps nose from washing out to the side.
+	if absf(angle) > 0.65:
+		impulse *= 1.22
+	# Limit impulse change per tick so camera flicks don't inject abrupt physics pops.
+	var lo := _last_yaw_impulse - max_yaw_impulse_step
+	var hi := _last_yaw_impulse + max_yaw_impulse_step
+	impulse = clampf(impulse, lo, hi)
+	_last_yaw_impulse = impulse
 	state.apply_torque_impulse(Vector3.UP * impulse)
 
 func is_player_in_handle_zone(player: CharacterBody3D) -> bool:

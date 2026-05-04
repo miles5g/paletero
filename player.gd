@@ -42,6 +42,8 @@ var _stand_shape_height: float
 var _camera: Camera3D
 var _push_arm_l: MeshInstance3D = null
 var _push_arm_r: MeshInstance3D = null
+var _push_forearm_l: MeshInstance3D = null
+var _push_forearm_r: MeshInstance3D = null
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -138,7 +140,11 @@ func _attach_to_cart(cart: RigidBody3D) -> void:
 		remove_collision_exception_with(current_cart)
 	current_cart = cart
 	is_pushing = true
+	can_interact = false
 	add_collision_exception_with(cart)
+	var lbl := get_parent().get_node_or_null("HUD/InteractionLabel") as Label
+	if lbl:
+		lbl.visible = false
 	_hitch_distance = hitch_nominal_distance
 	_hitch_dy = cart.global_position.y - global_position.y
 	var face := -global_transform.basis.z
@@ -169,18 +175,28 @@ func _new_push_arm_mesh(arm_name: String) -> MeshInstance3D:
 
 func _create_push_arms() -> void:
 	_destroy_push_arms()
-	_push_arm_l = _new_push_arm_mesh("PushArmL")
-	_push_arm_r = _new_push_arm_mesh("PushArmR")
+	_push_arm_l = _new_push_arm_mesh("PushArmUpperL")
+	_push_arm_r = _new_push_arm_mesh("PushArmUpperR")
+	_push_forearm_l = _new_push_arm_mesh("PushArmLowerL")
+	_push_forearm_r = _new_push_arm_mesh("PushArmLowerR")
 	add_child(_push_arm_l)
 	add_child(_push_arm_r)
+	add_child(_push_forearm_l)
+	add_child(_push_forearm_r)
 
 func _destroy_push_arms() -> void:
 	if _push_arm_l != null and is_instance_valid(_push_arm_l):
 		_push_arm_l.queue_free()
 	if _push_arm_r != null and is_instance_valid(_push_arm_r):
 		_push_arm_r.queue_free()
+	if _push_forearm_l != null and is_instance_valid(_push_forearm_l):
+		_push_forearm_l.queue_free()
+	if _push_forearm_r != null and is_instance_valid(_push_forearm_r):
+		_push_forearm_r.queue_free()
 	_push_arm_l = null
 	_push_arm_r = null
+	_push_forearm_l = null
+	_push_forearm_r = null
 
 func _stretch_arm_between(mi: MeshInstance3D, from: Vector3, to: Vector3) -> void:
 	var dir := to - from
@@ -203,10 +219,32 @@ func _stretch_arm_between(mi: MeshInstance3D, from: Vector3, to: Vector3) -> voi
 	mi.global_position = from + dir * 0.5
 	mi.global_basis = Basis(x_axis, y_axis, z_axis)
 
+func _clamp_arm_reach_target(shoulder: Vector3, desired_target: Vector3) -> Vector3:
+	var local_target := global_transform.basis.inverse() * (desired_target - shoulder)
+	# Keep arms in front hemisphere: z > 0 is behind the torso in this setup.
+	# No side stiffening: arms can sweep naturally in front.
+	if local_target.z > 0.0:
+		local_target.z = 0.0
+	return shoulder + global_transform.basis * local_target
+
+func _arm_elbow_target(shoulder: Vector3, hand_target: Vector3, side_sign: float) -> Vector3:
+	var dir := hand_target - shoulder
+	var len := dir.length()
+	if len < 0.05:
+		return shoulder + global_transform.basis * Vector3(0.0, -0.12, -0.08)
+	var mid := shoulder + dir * 0.5
+	var b := global_transform.basis
+	var bend_out := b.x * side_sign * 0.14
+	var bend_down := -b.y * 0.11
+	# Slight backward bow adds loose, organic bend while keeping hands attached.
+	var bend_back := b.z * 0.08
+	var bend_scale := clampf(len / 2.0, 0.55, 1.0)
+	return mid + (bend_out + bend_down + bend_back) * bend_scale
+
 func _update_push_arms_visual() -> void:
 	if current_cart == null or not is_instance_valid(current_cart):
 		return
-	if _push_arm_l == null or _push_arm_r == null:
+	if _push_arm_l == null or _push_arm_r == null or _push_forearm_l == null or _push_forearm_r == null:
 		return
 	var b := global_transform.basis
 	var left_shoulder := global_position + b * Vector3(-0.42, 0.92, 0.08)
@@ -218,8 +256,14 @@ func _update_push_arms_visual() -> void:
 	else:
 		var cb := current_cart.global_transform.basis
 		handle_gp = current_cart.global_position + cb * Vector3(0.0, 0.45, 0.75)
-	_stretch_arm_between(_push_arm_l, left_shoulder, handle_gp)
-	_stretch_arm_between(_push_arm_r, right_shoulder, handle_gp)
+	var left_target := _clamp_arm_reach_target(left_shoulder, handle_gp)
+	var right_target := _clamp_arm_reach_target(right_shoulder, handle_gp)
+	var left_elbow := _arm_elbow_target(left_shoulder, left_target, -1.0)
+	var right_elbow := _arm_elbow_target(right_shoulder, right_target, 1.0)
+	_stretch_arm_between(_push_arm_l, left_shoulder, left_elbow)
+	_stretch_arm_between(_push_forearm_l, left_elbow, left_target)
+	_stretch_arm_between(_push_arm_r, right_shoulder, right_elbow)
+	_stretch_arm_between(_push_forearm_r, right_elbow, right_target)
 
 func _apply_hitch_forces(delta: float) -> void:
 	if current_cart == null or not is_instance_valid(current_cart):
@@ -240,6 +284,11 @@ func _apply_hitch_forces(delta: float) -> void:
 	var target_xz := global_position + _hitch_forward_smooth * _hitch_distance + right * wob
 	var desired := Vector3(target_xz.x, global_position.y + _hitch_dy, target_xz.z)
 	var err: Vector3 = desired - current_cart.global_position
+	# Hard guard: if cart drifts behind, add strong forward pull to recover control quickly.
+	var to_cart_xz := current_cart.global_position - global_position
+	to_cart_xz.y = 0.0
+	var behind_dist := maxf(0.0, -to_cart_xz.dot(_hitch_forward_smooth))
+	var behind_correction := _hitch_forward_smooth * (behind_dist * hitch_spring * 0.9)
 	var v := current_cart.linear_velocity
 	var damp_h := Vector3(v.x, 0.0, v.z) * hitch_damping
 	var damp_v := Vector3(0.0, v.y, 0.0) * hitch_damping * 0.42
@@ -249,6 +298,7 @@ func _apply_hitch_forces(delta: float) -> void:
 	current_cart.apply_central_force(
 		Vector3(err.x, 0.0, err.z) * hitch_spring
 		+ Vector3(0.0, err.y, 0.0) * hitch_vertical_spring
+		+ Vector3(behind_correction.x, 0.0, behind_correction.z)
 		+ Vector3(match_xz.x, 0.0, match_xz.z)
 		- damp_h
 		- damp_v
@@ -261,6 +311,10 @@ func _detach_from_cart() -> void:
 		cart.can_sleep = true
 		remove_collision_exception_with(cart)
 	is_pushing = false
+	can_interact = cart != null and cart.has_method("is_player_in_grab_range") and cart.is_player_in_grab_range(self)
+	var lbl := get_parent().get_node_or_null("HUD/InteractionLabel") as Label
+	if lbl:
+		lbl.visible = can_interact
 	current_cart = null
 
 func _exit_tree() -> void:
