@@ -8,11 +8,15 @@ const PUSH_MOVE_SPEED_CAP: float = 2.0
 
 @export var push_force: float = 2.0
 @export var mouse_sensitivity: float = 0.0025
+## Virtual hitch: pulls cart toward the anchor relative to the player (works with CharacterBody3D + Jolt).
+@export var hitch_spring: float = 2200.0
+@export var hitch_damping: float = 95.0
 var gravity = ProjectSettings.get_setting("physics/3d/default_gravity")
 
 var is_pushing: bool = false
 var current_cart: RigidBody3D = null
-var _push_joint: Generic6DOFJoint3D = null
+## Cart center relative to player in player-local axes (XZ follow, Y keeps height relationship).
+var _hitch_cart_local: Vector3 = Vector3.ZERO
 var can_interact: bool = false
 
 var _mesh_instance: MeshInstance3D
@@ -56,10 +60,6 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _physics_process(delta: float) -> void:
 	if Input.is_action_just_pressed("interact"):
-		print("Interact signal: ", can_interact)
-		if can_interact:
-			print("CONNECTED")
-			_apply_cart_connection_highlight()
 		_interact()
 
 	if not is_on_floor():
@@ -93,6 +93,10 @@ func _physics_process(delta: float) -> void:
 
 	move_and_slide()
 
+	if is_pushing and current_cart != null:
+		current_cart.sleeping = false
+		_apply_hitch_forces()
+
 	for i in get_slide_collision_count():
 		var collision = get_slide_collision(i)
 		var body = collision.get_collider()
@@ -101,18 +105,6 @@ func _physics_process(delta: float) -> void:
 			var force_dir = -collision.get_normal()
 			body.apply_central_impulse(force_dir * velocity.length() * push_force)
 
-func _apply_cart_connection_highlight() -> void:
-	var cart := get_parent().get_node_or_null("Cart") as RigidBody3D
-	if cart == null:
-		return
-	for child in cart.get_children():
-		if child is MeshInstance3D:
-			var mi := child as MeshInstance3D
-			var mat := StandardMaterial3D.new()
-			mat.albedo_color = Color(0.2, 0.85, 0.35)
-			mi.material_override = mat
-			return
-
 func _interact() -> void:
 	if is_pushing:
 		_detach_from_cart()
@@ -120,44 +112,37 @@ func _interact() -> void:
 	if not can_interact:
 		return
 	for cart in get_tree().get_nodes_in_group("carts"):
-		if cart is RigidBody3D and cart.has_method("is_player_in_handle_zone") and cart.is_player_in_handle_zone(self):
+		if cart is RigidBody3D and cart.has_method("is_player_in_grab_range") and cart.is_player_in_grab_range(self):
 			_attach_to_cart(cart)
 			return
-	print("Interact pressed")
 
 func _attach_to_cart(cart: RigidBody3D) -> void:
-	if _push_joint != null:
-		_push_joint.queue_free()
-		_push_joint = null
+	if current_cart != null and current_cart != cart:
+		remove_collision_exception_with(current_cart)
 	current_cart = cart
 	is_pushing = true
-	var world_node := get_parent()
-	_push_joint = Generic6DOFJoint3D.new()
-	world_node.add_child(_push_joint)
-	_push_joint.exclude_nodes_from_collision = true
-	_push_joint.global_position = global_position.lerp(cart.global_position, 0.45)
-	_push_joint.global_basis = Basis.IDENTITY
-	_push_joint.node_a = world_node.get_path_to(self)
-	_push_joint.node_b = world_node.get_path_to(cart)
-	_configure_push_joint(_push_joint)
+	add_collision_exception_with(cart)
+	_hitch_cart_local = global_transform.basis.inverse() * (cart.global_position - global_position)
+	cart.freeze = false
+	cart.sleeping = false
+	cart.can_sleep = false
 
-func _configure_push_joint(joint: Generic6DOFJoint3D) -> void:
-	for set_flag in [joint.set_flag_x, joint.set_flag_y, joint.set_flag_z]:
-		set_flag.call(Generic6DOFJoint3D.FLAG_ENABLE_LINEAR_LIMIT, true)
-		set_flag.call(Generic6DOFJoint3D.FLAG_ENABLE_ANGULAR_LIMIT, false)
-	joint.set_param_x(Generic6DOFJoint3D.PARAM_LINEAR_LOWER_LIMIT, 0.0)
-	joint.set_param_x(Generic6DOFJoint3D.PARAM_LINEAR_UPPER_LIMIT, 0.0)
-	joint.set_param_y(Generic6DOFJoint3D.PARAM_LINEAR_LOWER_LIMIT, 0.0)
-	joint.set_param_y(Generic6DOFJoint3D.PARAM_LINEAR_UPPER_LIMIT, 0.0)
-	joint.set_param_z(Generic6DOFJoint3D.PARAM_LINEAR_LOWER_LIMIT, 0.0)
-	joint.set_param_z(Generic6DOFJoint3D.PARAM_LINEAR_UPPER_LIMIT, 0.0)
+func _apply_hitch_forces() -> void:
+	if current_cart == null or not is_instance_valid(current_cart):
+		return
+	var desired := global_position + global_transform.basis * _hitch_cart_local
+	var err: Vector3 = desired - current_cart.global_position
+	var v := current_cart.linear_velocity
+	var damp := Vector3(v.x, 0.0, v.z) * hitch_damping
+	current_cart.apply_central_force(err * hitch_spring - damp)
 
 func _detach_from_cart() -> void:
+	var cart := current_cart
+	if cart != null:
+		cart.can_sleep = true
+		remove_collision_exception_with(cart)
 	is_pushing = false
 	current_cart = null
-	if _push_joint != null:
-		_push_joint.queue_free()
-		_push_joint = null
 
 func _exit_tree() -> void:
 	_detach_from_cart()

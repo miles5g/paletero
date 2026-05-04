@@ -84,3 +84,10 @@ func is_player_in_handle_zone(player: CharacterBody3D) -> bool:
 	if _handle_zone == null:
 		return false
 	return _handle_zone.get_overlapping_bodies().has(player)
+
+func is_player_in_grab_range(player: CharacterBody3D) -> bool:
+	if is_player_in_handle_zone(player):
+		return true
+	if _interaction_area == null:
+		return false
+	return _interaction_area.get_overlapping_bodies().has(player)
