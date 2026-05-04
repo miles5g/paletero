@@ -1,7 +1,7 @@
 extends CharacterBody3D
 
 @export var speed: float = 4.0
-@export var push_force: float = 2.0 
+@export var push_force: float = 2.0
 var gravity = ProjectSettings.get_setting("physics/3d/default_gravity")
 
 func _physics_process(delta: float) -> void:
@@ -26,7 +26,7 @@ func _physics_process(delta: float) -> void:
 	for i in get_slide_collision_count():
 		var collision = get_slide_collision(i)
 		var body = collision.get_collider()
-		
+
 		# If the thing we walk into is a RigidBody (The Cart), give it a push
 		if body is RigidBody3D:
 			var force_dir = -collision.get_normal()

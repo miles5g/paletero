@@ -1,6 +1,5 @@
-.cursorrules
 # EL PALETERO - CURSOR AI DIRECTIVES
-# CRITICAL: This project uses GODOT 4.x and GDScript. 
+# CRITICAL: This project uses GODOT 4.x and GDScript.
 
 1. NO GODOT 3 SYNTAX:
 - Never use KinematicBody3D (Use CharacterBody3D).
