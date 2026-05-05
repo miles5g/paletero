@@ -153,14 +153,6 @@ func _make_terminal_font() -> Font:
 	return fv
 
 
-func _inventory_panel_stylebox() -> StyleBoxFlat:
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color.BLACK
-	sb.set_border_width_all(2)
-	sb.border_color = Color.WHITE
-	return sb
-
-
 func _apply_terminal_theme_to_node(node: Node, font: Font, font_size: int) -> void:
 	if node is Label:
 		var lab := node as Label
@@ -172,7 +164,13 @@ func _apply_terminal_theme_to_node(node: Node, font: Font, font_size: int) -> vo
 		rt.add_theme_font_override("normal_font", font)
 		rt.add_theme_font_override("bold_font", font)
 		rt.add_theme_font_size_override("normal_font_size", font_size)
+		rt.add_theme_font_size_override("bold_font_size", font_size)
 		rt.add_theme_color_override("default_color", Color.WHITE)
+	elif node is Button:
+		var b := node as Button
+		b.add_theme_font_override("font", font)
+		b.add_theme_font_size_override("font_size", font_size)
+		b.add_theme_color_override("font_color", Color.WHITE)
 	for c in node.get_children():
 		_apply_terminal_theme_to_node(c, font, font_size)
 
@@ -193,129 +191,6 @@ func set_grab_prompts_visible(v: bool) -> void:
 	for c in box.get_children():
 		if c is Control:
 			(c as Control).visible = v
-
-
-func _create_inventory_menu() -> Panel:
-	var panel := Panel.new()
-	panel.name = "InventoryMenu"
-	panel.visible = false
-	panel.anchor_left = 0.5
-	panel.anchor_right = 0.5
-	panel.anchor_top = 0.5
-	panel.anchor_bottom = 0.5
-	panel.offset_left = -300.0
-	panel.offset_top = -220.0
-	panel.offset_right = 300.0
-	panel.offset_bottom = 220.0
-	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	panel.grow_vertical = Control.GROW_DIRECTION_BOTH
-	panel.add_theme_stylebox_override("panel", _inventory_panel_stylebox())
-
-	var term_font := _make_terminal_font()
-	const FONT_SZ := 13
-
-	var outer := MarginContainer.new()
-	outer.name = "OuterMargin"
-	outer.set_anchors_preset(Control.PRESET_FULL_RECT)
-	outer.add_theme_constant_override("margin_left", 10)
-	outer.add_theme_constant_override("margin_top", 10)
-	outer.add_theme_constant_override("margin_right", 10)
-	outer.add_theme_constant_override("margin_bottom", 10)
-	panel.add_child(outer)
-
-	var main_v := VBoxContainer.new()
-	main_v.name = "MainVBox"
-	main_v.set_anchors_preset(Control.PRESET_FULL_RECT)
-	main_v.add_theme_constant_override("separation", 6)
-	outer.add_child(main_v)
-
-	var header_wrap := MarginContainer.new()
-	header_wrap.name = "HeaderMargin"
-	header_wrap.add_theme_constant_override("margin_left", 4)
-	header_wrap.add_theme_constant_override("margin_right", 4)
-	header_wrap.add_theme_constant_override("margin_top", 2)
-	header_wrap.add_theme_constant_override("margin_bottom", 4)
-
-	var header := Label.new()
-	header.name = "HeaderBar"
-	header.text = "== CART MANIFEST =="
-	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	header.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	header_wrap.add_child(header)
-	main_v.add_child(header_wrap)
-
-	var hsplit := HSplitContainer.new()
-	hsplit.name = "HSplitContainer"
-	hsplit.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	hsplit.custom_minimum_size = Vector2(0, 120)
-
-	var scroll := ScrollContainer.new()
-	scroll.name = "ScrollContainer"
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.custom_minimum_size = Vector2(210, 0)
-	var scroll_bg := StyleBoxFlat.new()
-	scroll_bg.bg_color = Color.BLACK
-	scroll.add_theme_stylebox_override("panel", scroll_bg)
-
-	var item_vbox := VBoxContainer.new()
-	item_vbox.name = "ItemListVBox"
-	item_vbox.add_theme_constant_override("separation", 2)
-	scroll.add_child(item_vbox)
-	hsplit.add_child(scroll)
-
-	var right_col := VBoxContainer.new()
-	right_col.name = "DetailsColumn"
-	right_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	right_col.add_theme_constant_override("separation", 6)
-
-	var icon := TextureRect.new()
-	icon.name = "DetailIcon"
-	icon.custom_minimum_size = Vector2(112, 112)
-	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-
-	var name_lbl := Label.new()
-	name_lbl.name = "DetailName"
-	name_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-
-	var desc_lbl := Label.new()
-	desc_lbl.name = "DetailDescription"
-	desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	desc_lbl.size_flags_vertical = Control.SIZE_EXPAND_FILL
-
-	var weight_lbl := Label.new()
-	weight_lbl.name = "DetailWeight"
-
-	var value_lbl := Label.new()
-	value_lbl.name = "DetailValue"
-
-	right_col.add_child(icon)
-	right_col.add_child(name_lbl)
-	right_col.add_child(desc_lbl)
-	right_col.add_child(weight_lbl)
-	right_col.add_child(value_lbl)
-	hsplit.add_child(right_col)
-	main_v.add_child(hsplit)
-
-	var footer_wrap := MarginContainer.new()
-	footer_wrap.name = "FooterMargin"
-	footer_wrap.add_theme_constant_override("margin_left", 4)
-	footer_wrap.add_theme_constant_override("margin_right", 4)
-	footer_wrap.add_theme_constant_override("margin_top", 4)
-	footer_wrap.add_theme_constant_override("margin_bottom", 2)
-
-	var footer := Label.new()
-	footer.name = "FooterBar"
-	footer.text = "[TAB] EXIT"
-	footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	footer.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	footer_wrap.add_child(footer)
-	main_v.add_child(footer_wrap)
-
-	_apply_terminal_theme_to_node(panel, term_font, FONT_SZ)
-
-	panel.set_script(load("res://inventory_menu.gd"))
-	return panel
 
 
 func _ready() -> void:
@@ -350,8 +225,10 @@ func _ready() -> void:
 	prompt_box.add_child(interaction_label)
 	hud.add_child(prompt_box)
 
-	var inv_menu := _create_inventory_menu()
+	var inv_menu: Node = load("res://MasterHUD.tscn").instantiate()
 	hud.add_child(inv_menu)
+	var term_inv_font := _make_terminal_font()
+	_apply_terminal_theme_to_node(inv_menu, term_inv_font, 13)
 
 	var scan := ColorRect.new()
 	scan.name = "ScanlineOverlay"

@@ -27,7 +27,7 @@ var inventory_list: Array[ItemResource] = []
 
 func _ready() -> void:
 	add_to_group("carts")
-	_stock_initial_paleta()
+	_stock_initial_inventory()
 	_handle_zone = Area3D.new()
 	_handle_zone.name = "HandleZone"
 	_handle_zone.monitoring = true
@@ -73,7 +73,7 @@ func add_item_to_inventory(new_item_resource: ItemResource) -> void:
 	inventory_list.append(new_item_resource.duplicate(true))
 
 
-func _stock_initial_paleta() -> void:
+func _stock_initial_inventory() -> void:
 	var lime := ItemResource.new()
 	lime.item_name = "Lime Paleta"
 	lime.quantity = 1
@@ -82,6 +82,33 @@ func _stock_initial_paleta() -> void:
 	lime.description = "Tart lime frozen fruit bar."
 	lime.rarity = ItemResource.Rarity.GREEN
 	add_item_to_inventory(lime)
+
+	var ice := ItemResource.new()
+	ice.item_name = "Dry Ice Pack"
+	ice.quantity = 1
+	ice.weight_lbs = 5.0
+	ice.value_usd = 10.00
+	ice.description = "Keeps the cart cold. Heavy but necessary."
+	ice.rarity = ItemResource.Rarity.BLUE
+	add_item_to_inventory(ice)
+
+	var recipe := ItemResource.new()
+	recipe.item_name = "Secret Recipe"
+	recipe.quantity = 1
+	recipe.weight_lbs = 0.1
+	recipe.value_usd = 500.00
+	recipe.description = "A handwritten note with the perfect flavor ratios. Priceless."
+	recipe.rarity = ItemResource.Rarity.GOLD
+	add_item_to_inventory(recipe)
+
+	var cooler := ItemResource.new()
+	cooler.item_name = "Industrial Cooler"
+	cooler.quantity = 1
+	cooler.weight_lbs = 25.0
+	cooler.value_usd = 250.00
+	cooler.description = "A heavy-duty compressor. Makes the cart significantly heavier."
+	cooler.rarity = ItemResource.Rarity.GOLD
+	add_item_to_inventory(cooler)
 
 
 func _physics_process(delta: float) -> void:
