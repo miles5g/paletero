@@ -1,6 +1,7 @@
 extends Panel
 
 enum SortColumn { NAME, CAT, QTY, WT, VAL }
+enum Section { MANIFEST, STATS, MAP }
 
 ## Matches HeaderRow column widths in MasterHUD.tscn (pixel-aligned with rows)
 const COL_QTY_WIDTH: int = 44
@@ -49,6 +50,14 @@ var _action_list: VBoxContainer
 var _drop_button: Button
 var _trash_button: Button
 var _eat_button: Button
+var _btn_manifest: Button
+var _btn_stats: Button
+var _btn_map: Button
+var _right_panel: Control
+var _manifest_page: Control
+var _stats_page: Control
+var _map_page: Control
+var _active_section: Section = Section.MANIFEST
 
 var _cart: RigidBody3D = null
 var _entries: Array[ItemResource] = []
@@ -96,6 +105,12 @@ func _ready() -> void:
 	_eat_button = get_node(
 		"OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/ActionList/EatButton"
 	) as Button
+	_btn_manifest = get_node("OuterMargin/MainContainer/LeftRailPanel/LeftRail/BtnManifest") as Button
+	_btn_stats = get_node("OuterMargin/MainContainer/LeftRailPanel/LeftRail/BtnStats") as Button
+	_btn_map = get_node("OuterMargin/MainContainer/LeftRailPanel/LeftRail/BtnMap") as Button
+	_right_panel = get_node_or_null("OuterMargin/MainContainer/RightPanel") as Control
+	_manifest_page = get_node("OuterMargin/MainContainer/CenterPanel/CenterColumn") as Control
+	_ensure_section_pages()
 	if _detail_icon and _detail_icon.texture == null:
 		_detail_icon.texture = _make_temp_item_preview_texture()
 		_detail_icon.visible = true
@@ -108,9 +123,11 @@ func _deferred_after_world_theme() -> void:
 	_style_sort_buttons()
 	_connect_sort_buttons()
 	_connect_action_buttons()
+	_connect_nav_buttons()
 	_apply_selectable_golden_hover()
 	_style_action_buttons_bw()
 	_update_sort_button_icons()
+	_show_section(_active_section)
 	if _detail_name:
 		_detail_name.add_theme_font_size_override("font_size", 17)
 	if _total_money_label:
@@ -199,19 +216,19 @@ func _style_list_headers() -> void:
 		hdr_cat.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	if hdr_qty:
 		hdr_qty.custom_minimum_size = Vector2(META_LABEL_MIN_WIDTH, 0)
-		hdr_qty.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		hdr_qty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		hdr_qty.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		hdr_qty.mouse_filter = Control.MOUSE_FILTER_STOP
 		hdr_qty.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	if hdr_wt:
 		hdr_wt.custom_minimum_size = Vector2(META_LABEL_MIN_WIDTH, 0)
-		hdr_wt.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		hdr_wt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		hdr_wt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		hdr_wt.mouse_filter = Control.MOUSE_FILTER_STOP
 		hdr_wt.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	if hdr_val:
 		hdr_val.custom_minimum_size = Vector2(META_LABEL_MIN_WIDTH, 0)
-		hdr_val.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		hdr_val.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		hdr_val.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		hdr_val.mouse_filter = Control.MOUSE_FILTER_STOP
 		hdr_val.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
@@ -233,8 +250,8 @@ func _golden_hover_stylebox(alpha: float) -> StyleBoxFlat:
 
 func _apply_selectable_golden_hover() -> void:
 	var transparent := _transparent_stylebox()
-	var hover_sb := _golden_hover_stylebox(0.38)
-	var pressed_sb := _golden_hover_stylebox(0.52)
+	var hover_sb := _golden_hover_stylebox(0.5)
+	var pressed_sb := _golden_hover_stylebox(0.65)
 	var paths := [
 		"OuterMargin/MainContainer/LeftRailPanel/LeftRail/BtnManifest",
 		"OuterMargin/MainContainer/LeftRailPanel/LeftRail/BtnStats",
@@ -249,10 +266,122 @@ func _apply_selectable_golden_hover() -> void:
 		var b := get_node_or_null(p) as Button
 		if b == null:
 			continue
+		b.flat = false
 		b.add_theme_stylebox_override("normal", transparent.duplicate())
 		b.add_theme_stylebox_override("hover", hover_sb.duplicate())
 		b.add_theme_stylebox_override("pressed", pressed_sb.duplicate())
 		b.add_theme_stylebox_override("focus", transparent.duplicate())
+	_update_nav_button_highlight()
+
+
+func _make_empty_section_page(title: String) -> VBoxContainer:
+	var box := VBoxContainer.new()
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	box.offset_left = 8.0
+	box.offset_top = 8.0
+	box.offset_right = -8.0
+	box.offset_bottom = -8.0
+	box.visible = false
+	box.add_theme_constant_override("separation", 8)
+	var label := Label.new()
+	label.text = title
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	label.add_theme_color_override("font_color", HEADER_GREY)
+	box.add_child(label)
+	return box
+
+
+func _ensure_section_pages() -> void:
+	var center_panel := get_node_or_null("OuterMargin/MainContainer/CenterPanel") as Panel
+	if center_panel == null:
+		return
+	_stats_page = center_panel.get_node_or_null("StatsPage") as Control
+	if _stats_page == null:
+		var stats_box := _make_empty_section_page("STATS (EMPTY)")
+		stats_box.name = "StatsPage"
+		center_panel.add_child(stats_box)
+		_stats_page = stats_box
+	_map_page = center_panel.get_node_or_null("MapPage") as Control
+	if _map_page == null:
+		var map_box := _make_empty_section_page("MAP (EMPTY)")
+		map_box.name = "MapPage"
+		center_panel.add_child(map_box)
+		_map_page = map_box
+
+
+func _connect_nav_buttons() -> void:
+	if _btn_manifest and not _btn_manifest.pressed.is_connected(_on_manifest_pressed):
+		_btn_manifest.pressed.connect(_on_manifest_pressed)
+		_btn_manifest.mouse_entered.connect(_on_nav_button_hover.bind(_btn_manifest, true))
+		_btn_manifest.mouse_exited.connect(_on_nav_button_hover.bind(_btn_manifest, false))
+	if _btn_stats and not _btn_stats.pressed.is_connected(_on_stats_pressed):
+		_btn_stats.pressed.connect(_on_stats_pressed)
+		_btn_stats.mouse_entered.connect(_on_nav_button_hover.bind(_btn_stats, true))
+		_btn_stats.mouse_exited.connect(_on_nav_button_hover.bind(_btn_stats, false))
+	if _btn_map and not _btn_map.pressed.is_connected(_on_map_pressed):
+		_btn_map.pressed.connect(_on_map_pressed)
+		_btn_map.mouse_entered.connect(_on_nav_button_hover.bind(_btn_map, true))
+		_btn_map.mouse_exited.connect(_on_nav_button_hover.bind(_btn_map, false))
+
+
+func _on_manifest_pressed() -> void:
+	_show_section(Section.MANIFEST)
+
+
+func _on_stats_pressed() -> void:
+	_show_section(Section.STATS)
+
+
+func _on_map_pressed() -> void:
+	_show_section(Section.MAP)
+
+
+func _show_section(section: Section) -> void:
+	_active_section = section
+	if _manifest_page:
+		_manifest_page.visible = section == Section.MANIFEST
+	if _stats_page:
+		_stats_page.visible = section == Section.STATS
+	if _map_page:
+		_map_page.visible = section == Section.MAP
+	if _right_panel:
+		_right_panel.visible = section == Section.MANIFEST
+	_update_nav_button_highlight()
+
+
+func _update_nav_button_highlight() -> void:
+	var transparent := _transparent_stylebox()
+	var active := _golden_hover_stylebox(0.45)
+	var mapping := {
+		_btn_manifest: Section.MANIFEST,
+		_btn_stats: Section.STATS,
+		_btn_map: Section.MAP,
+	}
+	for b in mapping.keys():
+		if b == null:
+			continue
+		var sec: Section = mapping[b]
+		b.add_theme_stylebox_override("normal", (active if _active_section == sec else transparent).duplicate())
+
+
+func _on_nav_button_hover(btn: Button, hover: bool) -> void:
+	if btn == null:
+		return
+	var sec: Section = Section.MANIFEST
+	if btn == _btn_stats:
+		sec = Section.STATS
+	elif btn == _btn_map:
+		sec = Section.MAP
+	if sec == _active_section:
+		# Active tab remains persistently highlighted.
+		btn.add_theme_stylebox_override("normal", _golden_hover_stylebox(0.45))
+		return
+	if hover:
+		btn.add_theme_stylebox_override("normal", _golden_hover_stylebox(0.26))
+	else:
+		btn.add_theme_stylebox_override("normal", _transparent_stylebox())
 
 
 func _style_sort_buttons() -> void:
@@ -658,7 +787,7 @@ func _make_inventory_row(entry: ItemResource, row_idx: int) -> Control:
 	var highlight := ColorRect.new()
 	highlight.name = "HighlightBar"
 	highlight.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	highlight.z_index = 0
+	highlight.z_index = 10
 	highlight.visible = false
 	highlight.set_anchors_preset(Control.PRESET_FULL_RECT)
 	highlight.offset_left = 0.0
@@ -670,7 +799,7 @@ func _make_inventory_row(entry: ItemResource, row_idx: int) -> Control:
 	var h := HBoxContainer.new()
 	h.add_theme_constant_override("separation", COL_H_SEP)
 	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	h.z_index = 1
+	h.z_index = 20
 	h.set_anchors_preset(Control.PRESET_FULL_RECT)
 	h.offset_left = 0.0
 	h.offset_top = 0.0
@@ -711,7 +840,7 @@ func _make_inventory_row(entry: ItemResource, row_idx: int) -> Control:
 
 	var qty_lbl := Label.new()
 	qty_lbl.text = str(entry.quantity).lpad(3, " ")
-	qty_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	qty_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	qty_lbl.custom_minimum_size = Vector2(META_LABEL_MIN_WIDTH, 0)
 	qty_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	qty_lbl.add_theme_font_size_override("font_size", ROW_META_FONT_SZ)
@@ -731,7 +860,7 @@ func _make_inventory_row(entry: ItemResource, row_idx: int) -> Control:
 
 	var wt_lbl := Label.new()
 	wt_lbl.text = _format_weight_smart(entry.weight_lbs).lpad(6, " ")
-	wt_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	wt_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	wt_lbl.custom_minimum_size = Vector2(META_LABEL_MIN_WIDTH, 0)
 	wt_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	wt_lbl.add_theme_font_size_override("font_size", ROW_META_FONT_SZ)
@@ -751,7 +880,7 @@ func _make_inventory_row(entry: ItemResource, row_idx: int) -> Control:
 
 	var val_lbl := Label.new()
 	val_lbl.text = ("%.2f" % entry.value_usd).lpad(7, " ")
-	val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	val_lbl.custom_minimum_size = Vector2(META_LABEL_MIN_WIDTH, 0)
 	val_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	val_lbl.add_theme_font_size_override("font_size", ROW_META_FONT_SZ)
