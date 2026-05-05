@@ -77,7 +77,7 @@ alignment = 0
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-custom_minimum_size = Vector2(200, 0)
+custom_minimum_size = Vector2(170, 0)
 
 [node name="CenterColumn" type="VBoxContainer" parent="OuterMargin/MainContainer/CenterPanel"]
 layout_mode = 1

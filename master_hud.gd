@@ -8,7 +8,7 @@ const COL_CAT_WIDTH: int = 30
 const COL_H_SEP: int = 6
 const COL_WT_WIDTH: int = 72
 const COL_VAL_WIDTH: int = 52
-const SORT_BTN_WIDTH: int = 12
+const SORT_BTN_WIDTH: int = 10
 const SORT_HDR_INNER_SEP: int = 0
 const SORT_NAME_BTN_SEP: int = 0
 const NAME_COL_LEFT_INSET: int = 0
@@ -18,14 +18,17 @@ const COL_WT_CELL_WIDTH: int = COL_WT_WIDTH + SORT_HDR_INNER_SEP + SORT_BTN_WIDT
 const COL_VAL_CELL_WIDTH: int = COL_VAL_WIDTH + SORT_HDR_INNER_SEP + SORT_BTN_WIDTH
 const NAME_COL_STRETCH: float = 4.0
 const META_COL_STRETCH: float = 1.0
-const META_LABEL_MIN_WIDTH: int = 10
+const META_LABEL_MIN_WIDTH: int = 8
 const HEADER_GREY := Color(0.42, 0.46, 0.52)
-const HEADER_FONT_SZ := 11
-const SORT_BTN_FONT_SZ := 9
+const HEADER_FONT_SZ := 9
+const SORT_BTN_FONT_SZ := 8
+const ROW_META_FONT_SZ := 9
 const ROW_HOVER_PULSE_SEC := 0.5
 const ROW_HOVER_GOLD := Color(1.0, 0.72, 0.18)
 const ROW_HOVER_ALPHA_HI := 0.42
 const ROW_HOVER_ALPHA_LO := 0.12
+const ROW_SELECTED_COLOR := Color(1.0, 0.98, 0.82)
+const ROW_SELECTED_ALPHA := 0.62
 
 var _sort_column: SortColumn = SortColumn.NAME
 var _sort_ascending: bool = true
@@ -505,6 +508,7 @@ func _fill_item_list_rows() -> void:
 	for entry in _entries:
 		_item_list.add_child(_make_inventory_row(entry, i))
 		i += 1
+	_refresh_selected_row_highlight()
 
 
 func _set_action_list_visible(v: bool) -> void:
@@ -638,13 +642,14 @@ func refresh() -> void:
 func _make_inventory_row(entry: ItemResource, row_idx: int) -> Control:
 	var rc := _rarity_color(entry.rarity)
 	var shell := Control.new()
+	shell.name = "Row_%d" % row_idx
 	shell.mouse_filter = Control.MOUSE_FILTER_STOP
 	shell.custom_minimum_size.y = 34
 
 	var highlight := ColorRect.new()
 	highlight.name = "HighlightBar"
 	highlight.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	highlight.z_index = -1
+	highlight.z_index = 0
 	highlight.visible = false
 	highlight.set_anchors_preset(Control.PRESET_FULL_RECT)
 	highlight.offset_left = 0.0
@@ -656,6 +661,7 @@ func _make_inventory_row(entry: ItemResource, row_idx: int) -> Control:
 	var h := HBoxContainer.new()
 	h.add_theme_constant_override("separation", COL_H_SEP)
 	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	h.z_index = 1
 	h.set_anchors_preset(Control.PRESET_FULL_RECT)
 	h.offset_left = 0.0
 	h.offset_top = 0.0
@@ -679,6 +685,7 @@ func _make_inventory_row(entry: ItemResource, row_idx: int) -> Control:
 	cat_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	cat_lbl.custom_minimum_size = Vector2(META_LABEL_MIN_WIDTH, 0)
 	cat_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cat_lbl.add_theme_font_size_override("font_size", ROW_META_FONT_SZ)
 	cat_lbl.add_theme_color_override("font_color", Color.WHITE)
 	var cat_pad := Control.new()
 	cat_pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -698,6 +705,7 @@ func _make_inventory_row(entry: ItemResource, row_idx: int) -> Control:
 	qty_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	qty_lbl.custom_minimum_size = Vector2(META_LABEL_MIN_WIDTH, 0)
 	qty_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	qty_lbl.add_theme_font_size_override("font_size", ROW_META_FONT_SZ)
 	qty_lbl.add_theme_color_override("font_color", Color.WHITE)
 	var qty_pad := Control.new()
 	qty_pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -717,6 +725,7 @@ func _make_inventory_row(entry: ItemResource, row_idx: int) -> Control:
 	wt_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	wt_lbl.custom_minimum_size = Vector2(META_LABEL_MIN_WIDTH, 0)
 	wt_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	wt_lbl.add_theme_font_size_override("font_size", ROW_META_FONT_SZ)
 	wt_lbl.add_theme_color_override("font_color", Color.WHITE)
 	var wt_pad := Control.new()
 	wt_pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -736,6 +745,7 @@ func _make_inventory_row(entry: ItemResource, row_idx: int) -> Control:
 	val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	val_lbl.custom_minimum_size = Vector2(META_LABEL_MIN_WIDTH, 0)
 	val_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	val_lbl.add_theme_font_size_override("font_size", ROW_META_FONT_SZ)
 	val_lbl.add_theme_color_override("font_color", Color.WHITE)
 	var val_pad := Control.new()
 	val_pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -763,13 +773,40 @@ func _make_inventory_row(entry: ItemResource, row_idx: int) -> Control:
 
 	var row_idx_captured := row_idx
 	shell.gui_input.connect(func (ev: InputEvent): _handle_row_click(ev, row_idx_captured))
-	shell.mouse_entered.connect(func (): _on_row_highlight_hover(highlight, true))
-	shell.mouse_exited.connect(func (): _on_row_highlight_hover(highlight, false))
+	shell.mouse_entered.connect(func (): _on_row_highlight_hover(highlight, row_idx_captured, true))
+	shell.mouse_exited.connect(func (): _on_row_highlight_hover(highlight, row_idx_captured, false))
 
 	return shell
 
 
-func _on_row_highlight_hover(highlight: ColorRect, hover: bool) -> void:
+func _set_row_selected_highlight(highlight: ColorRect, selected: bool) -> void:
+	if not is_instance_valid(highlight):
+		return
+	if selected:
+		highlight.visible = true
+		highlight.color = Color(ROW_SELECTED_COLOR.r, ROW_SELECTED_COLOR.g, ROW_SELECTED_COLOR.b, ROW_SELECTED_ALPHA)
+	else:
+		highlight.visible = false
+		highlight.color = Color(ROW_HOVER_GOLD.r, ROW_HOVER_GOLD.g, ROW_HOVER_GOLD.b, 0.0)
+
+
+func _refresh_selected_row_highlight() -> void:
+	if _item_list == null:
+		return
+	for i in range(_item_list.get_child_count()):
+		var row := _item_list.get_child(i) as Control
+		if row == null:
+			continue
+		var h := row.get_node_or_null("HighlightBar") as ColorRect
+		if h == null:
+			continue
+		var prev: Tween = _row_hover_tweens.get(h, null)
+		if prev is Tween and (prev as Tween).is_valid():
+			(prev as Tween).kill()
+		_set_row_selected_highlight(h, i == _selected_row_index)
+
+
+func _on_row_highlight_hover(highlight: ColorRect, row_idx: int, hover: bool) -> void:
 	if not is_instance_valid(highlight):
 		return
 	var prev: Tween = _row_hover_tweens.get(highlight, null)
@@ -790,6 +827,9 @@ func _on_row_highlight_hover(highlight: ColorRect, hover: bool) -> void:
 		tw.tween_property(highlight, "color", gold_lo, ROW_HOVER_PULSE_SEC)
 		_row_hover_tweens[highlight] = tw
 	else:
+		if row_idx == _selected_row_index:
+			_set_row_selected_highlight(highlight, true)
+			return
 		var tw2 := create_tween()
 		tw2.set_trans(Tween.TRANS_QUAD)
 		tw2.set_ease(Tween.EASE_IN)
@@ -846,6 +886,7 @@ func _select_index(idx: int) -> void:
 		_detail_icon.texture = null
 		_detail_icon.visible = false
 	_set_action_list_visible(true)
+	_refresh_selected_row_highlight()
 
 
 func _clear_detail_panel() -> void:
