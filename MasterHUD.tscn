@@ -79,7 +79,7 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 custom_minimum_size = Vector2(200, 0)
 
-[node name="CenterList" type="ScrollContainer" parent="OuterMargin/MainContainer/CenterPanel"]
+[node name="CenterColumn" type="VBoxContainer" parent="OuterMargin/MainContainer/CenterPanel"]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -90,9 +90,37 @@ offset_right = -8.0
 offset_bottom = -8.0
 grow_horizontal = 2
 grow_vertical = 2
-horizontal_scroll_mode = 0
+theme_override_constants/separation = 4
 
-[node name="ItemListVBox" type="VBoxContainer" parent="OuterMargin/MainContainer/CenterPanel/CenterList"]
+[node name="HeaderRow" type="HBoxContainer" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="HdrName" type="Label" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "NAME"
+
+[node name="HdrQty" type="Label" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow"]
+custom_minimum_size = Vector2(44, 0)
+layout_mode = 2
+horizontal_alignment = 2
+text = "QTY"
+
+[node name="HdrWt" type="Label" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow"]
+custom_minimum_size = Vector2(72, 0)
+layout_mode = 2
+horizontal_alignment = 2
+text = "WT"
+
+[node name="CenterList" type="ScrollContainer" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn"]
+layout_mode = 2
+size_flags_vertical = 3
+size_flags_horizontal = 3
+horizontal_scroll_mode = 0
+vertical_scroll_mode = 1
+
+[node name="ItemListVBox" type="VBoxContainer" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn/CenterList"]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 2

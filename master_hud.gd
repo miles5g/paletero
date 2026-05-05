@@ -1,5 +1,12 @@
 extends Panel
 
+## Matches HeaderRow column widths in MasterHUD.tscn
+const COL_QTY_WIDTH: int = 44
+const COL_WT_WIDTH: int = 72
+const HEADER_GREY := Color(0.42, 0.46, 0.52)
+const HEADER_FONT_SZ := 11
+const ROW_HOVER_MODULATE := Color(1.38, 1.38, 1.38)
+
 var _item_list: VBoxContainer
 var _detail_icon: TextureRect
 var _detail_name: Label
@@ -11,10 +18,14 @@ var _detail_description: Label
 var _cart: RigidBody3D = null
 var _entries: Array[ItemResource] = []
 
+var _row_hover_tweens: Dictionary = {}
+
 
 func _ready() -> void:
 	_apply_panel_borders()
-	_item_list = get_node("OuterMargin/MainContainer/CenterPanel/CenterList/ItemListVBox") as VBoxContainer
+	_item_list = get_node(
+		"OuterMargin/MainContainer/CenterPanel/CenterColumn/CenterList/ItemListVBox"
+	) as VBoxContainer
 	_detail_icon = get_node("OuterMargin/MainContainer/RightPanel/RightDetail/TopHalf") as TextureRect
 	_detail_name = get_node("OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/NameLabel") as Label
 	_detail_rarity = get_node("OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/RarityLabel") as RichTextLabel
@@ -27,13 +38,26 @@ func _ready() -> void:
 	_detail_description = get_node(
 		"OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/DescriptionLabel"
 	) as Label
-	call_deferred("_deferred_typography")
+	call_deferred("_deferred_after_world_theme")
 
 
-func _deferred_typography() -> void:
-	# Applied after world applies the global terminal font size so the title stays large.
+func _deferred_after_world_theme() -> void:
+	# Runs after world applies terminal theme so list headers stay grey/small.
+	_style_list_headers()
 	if _detail_name:
 		_detail_name.add_theme_font_size_override("font_size", 17)
+
+
+func _style_list_headers() -> void:
+	for path in [
+		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrName",
+		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrQty",
+		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrWt",
+	]:
+		var lab := get_node_or_null(path) as Label
+		if lab:
+			lab.add_theme_font_size_override("font_size", HEADER_FONT_SZ)
+			lab.add_theme_color_override("font_color", HEADER_GREY)
 
 
 func _panel_style() -> StyleBoxFlat:
@@ -55,7 +79,9 @@ func _apply_panel_borders() -> void:
 		var p := get_node_or_null(path) as Panel
 		if p:
 			p.add_theme_stylebox_override("panel", sb.duplicate())
-	var scroll_center := get_node_or_null("OuterMargin/MainContainer/CenterPanel/CenterList") as ScrollContainer
+	var scroll_center := get_node_or_null(
+		"OuterMargin/MainContainer/CenterPanel/CenterColumn/CenterList"
+	) as ScrollContainer
 	if scroll_center:
 		var sbs := sb.duplicate()
 		scroll_center.add_theme_stylebox_override("panel", sbs)
@@ -72,6 +98,10 @@ func bind_cart(cart: RigidBody3D) -> void:
 func refresh() -> void:
 	if _item_list == null:
 		return
+	for tw in _row_hover_tweens.values():
+		if tw is Tween and (tw as Tween).is_valid():
+			(tw as Tween).kill()
+	_row_hover_tweens.clear()
 	for c in _item_list.get_children():
 		c.queue_free()
 	_entries.clear()
@@ -90,26 +120,72 @@ func refresh() -> void:
 
 	var i := 0
 	for entry in _entries:
-		var row := RichTextLabel.new()
-		row.bbcode_enabled = true
-		row.scroll_active = false
-		row.autowrap_mode = TextServer.AUTOWRAP_OFF
-		row.fit_content = true
-		row.custom_minimum_size = Vector2(0, 20)
-		row.mouse_filter = Control.MOUSE_FILTER_STOP
-		row.focus_mode = Control.FOCUS_NONE
-		var name_hex := _rarity_hex(entry.rarity)
-		row.text = (
-			"[color=%s]%s[/color]  ×%d  [%s]"
-			% [name_hex, entry.item_name, entry.quantity, _rarity_abbrev(entry.rarity)]
-		)
-		var row_idx := i
-		row.gui_input.connect(func (ev: InputEvent): _handle_row_click(ev, row_idx))
+		var row := _make_inventory_row(entry, i)
 		_item_list.add_child(row)
 		i += 1
 
 	if _entries.size() > 0:
 		_select_index(0)
+
+
+func _make_inventory_row(entry: ItemResource, row_idx: int) -> Control:
+	var rc := _rarity_color(entry.rarity)
+	var shell := Control.new()
+	shell.mouse_filter = Control.MOUSE_FILTER_STOP
+	shell.custom_minimum_size.y = 26
+
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 6)
+	h.set_anchors_preset(Control.PRESET_FULL_RECT)
+	h.offset_left = 4.0
+	h.offset_top = 2.0
+	h.offset_right = -4.0
+	h.offset_bottom = -2.0
+
+	var name_lbl := Label.new()
+	name_lbl.text = entry.item_name
+	name_lbl.clip_text = true
+	name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_lbl.add_theme_color_override("font_color", rc)
+
+	var qty_lbl := Label.new()
+	qty_lbl.text = str(entry.quantity)
+	qty_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	qty_lbl.custom_minimum_size = Vector2(COL_QTY_WIDTH, 0)
+	qty_lbl.add_theme_color_override("font_color", Color.WHITE)
+
+	var wt_lbl := Label.new()
+	wt_lbl.text = "%.2f" % entry.weight_lbs
+	wt_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	wt_lbl.custom_minimum_size = Vector2(COL_WT_WIDTH, 0)
+	wt_lbl.add_theme_color_override("font_color", Color.WHITE)
+
+	h.add_child(name_lbl)
+	h.add_child(qty_lbl)
+	h.add_child(wt_lbl)
+	shell.add_child(h)
+
+	var row_idx_captured := row_idx
+	shell.gui_input.connect(func (ev: InputEvent): _handle_row_click(ev, row_idx_captured))
+	shell.mouse_entered.connect(func (): _on_row_hover(shell, true))
+	shell.mouse_exited.connect(func (): _on_row_hover(shell, false))
+
+	return shell
+
+
+func _on_row_hover(shell: Control, hover: bool) -> void:
+	if not is_instance_valid(shell):
+		return
+	var tw: Tween = _row_hover_tweens.get(shell, null)
+	if tw != null and tw.is_valid():
+		tw.kill()
+	tw = create_tween()
+	tw.set_trans(Tween.TRANS_SINE)
+	tw.set_ease(Tween.EASE_OUT)
+	tw.set_parallel(false)
+	var target := ROW_HOVER_MODULATE if hover else Color.WHITE
+	tw.tween_property(shell, "modulate", target, 0.1)
+	_row_hover_tweens[shell] = tw
 
 
 func _handle_row_click(ev: InputEvent, row_idx: int) -> void:
@@ -189,21 +265,3 @@ func _rarity_color(r: ItemResource.Rarity) -> Color:
 		ItemResource.Rarity.GOLD:
 			return Color(1.0, 0.86, 0.22)
 	return Color.WHITE
-
-
-func _rarity_hex(r: ItemResource.Rarity) -> String:
-	return _rarity_color(r).to_html(false)
-
-
-func _rarity_abbrev(r: ItemResource.Rarity) -> String:
-	match r:
-		ItemResource.Rarity.GREEN:
-			return "G"
-		ItemResource.Rarity.BLUE:
-			return "B"
-		ItemResource.Rarity.PURPLE:
-			return "P"
-		ItemResource.Rarity.GOLD:
-			return "Au"
-		_:
-			return "?"
