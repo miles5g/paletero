@@ -3,6 +3,8 @@ extends Node3D
 ## PS2-era floor read: tiny albedo so pixels fight the mesh, not crisp HD tiling.
 const FLOOR_ALBEDO_TEXTURE_RES: int = 256
 
+var _scanline_overlay: ColorRect = null
+
 
 func _make_floor_grit_texture(noise_seed: int) -> ImageTexture:
 	var img := Image.create(FLOOR_ALBEDO_TEXTURE_RES, FLOOR_ALBEDO_TEXTURE_RES, false, Image.FORMAT_RGBA8)
@@ -142,6 +144,47 @@ func _build_street_layout(root: Node3D) -> void:
 	)
 
 
+func _make_terminal_font() -> Font:
+	var sys := SystemFont.new()
+	sys.font_names = PackedStringArray(["Consolas", "Courier New", "Courier", "monospace"])
+	sys.subpixel_positioning = TextServer.SUBPIXEL_POSITIONING_DISABLED
+	var fv := FontVariation.new()
+	fv.base_font = sys
+	return fv
+
+
+func _inventory_panel_stylebox() -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color.BLACK
+	sb.set_border_width_all(2)
+	sb.border_color = Color.WHITE
+	return sb
+
+
+func _apply_terminal_theme_to_node(node: Node, font: Font, font_size: int) -> void:
+	if node is Label:
+		var lab := node as Label
+		lab.add_theme_font_override("font", font)
+		lab.add_theme_font_size_override("font_size", font_size)
+		lab.add_theme_color_override("font_color", Color.WHITE)
+	elif node is RichTextLabel:
+		var rt := node as RichTextLabel
+		rt.add_theme_font_override("normal_font", font)
+		rt.add_theme_font_override("bold_font", font)
+		rt.add_theme_font_size_override("normal_font_size", font_size)
+		rt.add_theme_color_override("default_color", Color.WHITE)
+	for c in node.get_children():
+		_apply_terminal_theme_to_node(c, font, font_size)
+
+
+func _update_scanline_display_height() -> void:
+	if _scanline_overlay == null:
+		return
+	var sm := _scanline_overlay.material as ShaderMaterial
+	if sm:
+		sm.set_shader_parameter("display_height", get_viewport().get_visible_rect().size.y)
+
+
 func set_grab_prompts_visible(v: bool) -> void:
 	var box := get_node_or_null("HUD/InteractionPrompts") as Control
 	if box == null:
@@ -160,40 +203,70 @@ func _create_inventory_menu() -> Panel:
 	panel.anchor_right = 0.5
 	panel.anchor_top = 0.5
 	panel.anchor_bottom = 0.5
-	panel.offset_left = -280.0
-	panel.offset_top = -190.0
-	panel.offset_right = 280.0
-	panel.offset_bottom = 190.0
+	panel.offset_left = -300.0
+	panel.offset_top = -220.0
+	panel.offset_right = 300.0
+	panel.offset_bottom = 220.0
 	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	panel.add_theme_stylebox_override("panel", _inventory_panel_stylebox())
 
-	var margin := MarginContainer.new()
-	margin.name = "MarginContainer"
-	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
-	margin.add_theme_constant_override("margin_left", 14)
-	margin.add_theme_constant_override("margin_top", 14)
-	margin.add_theme_constant_override("margin_right", 14)
-	margin.add_theme_constant_override("margin_bottom", 14)
-	panel.add_child(margin)
+	var term_font := _make_terminal_font()
+	const FONT_SZ := 13
+
+	var outer := MarginContainer.new()
+	outer.name = "OuterMargin"
+	outer.set_anchors_preset(Control.PRESET_FULL_RECT)
+	outer.add_theme_constant_override("margin_left", 10)
+	outer.add_theme_constant_override("margin_top", 10)
+	outer.add_theme_constant_override("margin_right", 10)
+	outer.add_theme_constant_override("margin_bottom", 10)
+	panel.add_child(outer)
+
+	var main_v := VBoxContainer.new()
+	main_v.name = "MainVBox"
+	main_v.set_anchors_preset(Control.PRESET_FULL_RECT)
+	main_v.add_theme_constant_override("separation", 6)
+	outer.add_child(main_v)
+
+	var header_wrap := MarginContainer.new()
+	header_wrap.name = "HeaderMargin"
+	header_wrap.add_theme_constant_override("margin_left", 4)
+	header_wrap.add_theme_constant_override("margin_right", 4)
+	header_wrap.add_theme_constant_override("margin_top", 2)
+	header_wrap.add_theme_constant_override("margin_bottom", 4)
+
+	var header := Label.new()
+	header.name = "HeaderBar"
+	header.text = "== CART MANIFEST =="
+	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	header.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	header_wrap.add_child(header)
+	main_v.add_child(header_wrap)
 
 	var hsplit := HSplitContainer.new()
 	hsplit.name = "HSplitContainer"
-	hsplit.set_anchors_preset(Control.PRESET_FULL_RECT)
-	margin.add_child(hsplit)
+	hsplit.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	hsplit.custom_minimum_size = Vector2(0, 120)
 
 	var scroll := ScrollContainer.new()
 	scroll.name = "ScrollContainer"
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.custom_minimum_size = Vector2(220, 0)
+	scroll.custom_minimum_size = Vector2(210, 0)
+	var scroll_bg := StyleBoxFlat.new()
+	scroll_bg.bg_color = Color.BLACK
+	scroll.add_theme_stylebox_override("panel", scroll_bg)
+
 	var item_vbox := VBoxContainer.new()
 	item_vbox.name = "ItemListVBox"
+	item_vbox.add_theme_constant_override("separation", 2)
 	scroll.add_child(item_vbox)
 	hsplit.add_child(scroll)
 
 	var right_col := VBoxContainer.new()
 	right_col.name = "DetailsColumn"
 	right_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	right_col.add_theme_constant_override("separation", 8)
+	right_col.add_theme_constant_override("separation", 6)
 
 	var icon := TextureRect.new()
 	icon.name = "DetailIcon"
@@ -222,6 +295,24 @@ func _create_inventory_menu() -> Panel:
 	right_col.add_child(weight_lbl)
 	right_col.add_child(value_lbl)
 	hsplit.add_child(right_col)
+	main_v.add_child(hsplit)
+
+	var footer_wrap := MarginContainer.new()
+	footer_wrap.name = "FooterMargin"
+	footer_wrap.add_theme_constant_override("margin_left", 4)
+	footer_wrap.add_theme_constant_override("margin_right", 4)
+	footer_wrap.add_theme_constant_override("margin_top", 4)
+	footer_wrap.add_theme_constant_override("margin_bottom", 2)
+
+	var footer := Label.new()
+	footer.name = "FooterBar"
+	footer.text = "[TAB] EXIT"
+	footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	footer.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	footer_wrap.add_child(footer)
+	main_v.add_child(footer_wrap)
+
+	_apply_terminal_theme_to_node(panel, term_font, FONT_SZ)
 
 	panel.set_script(load("res://inventory_menu.gd"))
 	return panel
@@ -261,6 +352,24 @@ func _ready() -> void:
 
 	var inv_menu := _create_inventory_menu()
 	hud.add_child(inv_menu)
+
+	var scan := ColorRect.new()
+	scan.name = "ScanlineOverlay"
+	scan.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	scan.set_anchors_preset(Control.PRESET_FULL_RECT)
+	var sm := ShaderMaterial.new()
+	sm.shader = load("res://hud_scanlines.gdshader")
+	sm.set_shader_parameter("line_spacing", 4.0)
+	sm.set_shader_parameter("line_opacity", 0.1)
+	scan.material = sm
+	hud.add_child(scan)
+	_scanline_overlay = scan
+	call_deferred("_update_scanline_display_height")
+	if not get_viewport().size_changed.is_connected(_update_scanline_display_height):
+		get_viewport().size_changed.connect(_update_scanline_display_height)
+
+	var term_ui_font := _make_terminal_font()
+	_apply_terminal_theme_to_node(prompt_box, term_ui_font, 14)
 
 	add_child(hud)
 

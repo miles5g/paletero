@@ -15,6 +15,10 @@ run/main_scene="uid://cnvc6merymxqj"
 config/features=PackedStringArray("4.6", "Forward Plus")
 config/icon="res://icon.svg"
 
+[gui]
+
+theme/default_font_antialiasing=0
+
 [input]
 
 move_forward={
