@@ -29,6 +29,7 @@ const ROW_HOVER_ALPHA_HI := 0.42
 const ROW_HOVER_ALPHA_LO := 0.12
 const ROW_SELECTED_COLOR := Color(1.0, 0.98, 0.82)
 const ROW_SELECTED_ALPHA := 0.62
+const ROW_SELECTED_ALPHA_LO := 0.28
 
 var _sort_column: SortColumn = SortColumn.NAME
 var _sort_ascending: bool = true
@@ -66,7 +67,9 @@ func _ready() -> void:
 	_total_weight_label = get_node(
 		"OuterMargin/MainContainer/CenterPanel/CenterColumn/WeightFooter/FooterTotalsHBox/TotalManifestWeightLabel"
 	) as Label
-	_detail_icon = get_node("OuterMargin/MainContainer/RightPanel/RightDetail/TopHalf") as TextureRect
+	_detail_icon = get_node(
+		"OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/ItemPreviewWindow/ItemPreviewImage"
+	) as TextureRect
 	_detail_name = get_node("OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/NameLabel") as Label
 	_detail_rarity = get_node("OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/RarityLabel") as RichTextLabel
 	_detail_category = get_node(
@@ -93,6 +96,9 @@ func _ready() -> void:
 	_eat_button = get_node(
 		"OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/ActionList/EatButton"
 	) as Button
+	if _detail_icon and _detail_icon.texture == null:
+		_detail_icon.texture = _make_temp_item_preview_texture()
+		_detail_icon.visible = true
 	_set_action_list_visible(false)
 	call_deferred("_deferred_after_world_theme")
 
@@ -636,7 +642,10 @@ func refresh() -> void:
 
 	update_total_manifest_weight()
 	_update_sort_button_icons()
-	_set_action_list_visible(false)
+	if _entries.size() > 0:
+		_select_index(0)
+	else:
+		_set_action_list_visible(false)
 
 
 func _make_inventory_row(entry: ItemResource, row_idx: int) -> Control:
@@ -779,12 +788,28 @@ func _make_inventory_row(entry: ItemResource, row_idx: int) -> Control:
 	return shell
 
 
+func _start_row_pulse(highlight: ColorRect, col_hi: Color, col_lo: Color) -> void:
+	highlight.visible = true
+	highlight.color = col_lo
+	var tw := create_tween()
+	tw.set_loops(-1)
+	tw.set_trans(Tween.TRANS_SINE)
+	tw.set_ease(Tween.EASE_IN_OUT)
+	tw.tween_property(highlight, "color", col_hi, ROW_HOVER_PULSE_SEC)
+	tw.tween_property(highlight, "color", col_lo, ROW_HOVER_PULSE_SEC)
+	_row_hover_tweens[highlight] = tw
+
+
 func _set_row_selected_highlight(highlight: ColorRect, selected: bool) -> void:
 	if not is_instance_valid(highlight):
 		return
+	var prev: Tween = _row_hover_tweens.get(highlight, null)
+	if prev is Tween and (prev as Tween).is_valid():
+		(prev as Tween).kill()
 	if selected:
-		highlight.visible = true
-		highlight.color = Color(ROW_SELECTED_COLOR.r, ROW_SELECTED_COLOR.g, ROW_SELECTED_COLOR.b, ROW_SELECTED_ALPHA)
+		var sel_hi := Color(ROW_SELECTED_COLOR.r, ROW_SELECTED_COLOR.g, ROW_SELECTED_COLOR.b, ROW_SELECTED_ALPHA)
+		var sel_lo := Color(ROW_SELECTED_COLOR.r, ROW_SELECTED_COLOR.g, ROW_SELECTED_COLOR.b, ROW_SELECTED_ALPHA_LO)
+		_start_row_pulse(highlight, sel_hi, sel_lo)
 	else:
 		highlight.visible = false
 		highlight.color = Color(ROW_HOVER_GOLD.r, ROW_HOVER_GOLD.g, ROW_HOVER_GOLD.b, 0.0)
@@ -800,9 +825,6 @@ func _refresh_selected_row_highlight() -> void:
 		var h := row.get_node_or_null("HighlightBar") as ColorRect
 		if h == null:
 			continue
-		var prev: Tween = _row_hover_tweens.get(h, null)
-		if prev is Tween and (prev as Tween).is_valid():
-			(prev as Tween).kill()
 		_set_row_selected_highlight(h, i == _selected_row_index)
 
 
@@ -815,17 +837,14 @@ func _on_row_highlight_hover(highlight: ColorRect, row_idx: int, hover: bool) ->
 
 	var gold_hi := Color(ROW_HOVER_GOLD.r, ROW_HOVER_GOLD.g, ROW_HOVER_GOLD.b, ROW_HOVER_ALPHA_HI)
 	var gold_lo := Color(ROW_HOVER_GOLD.r, ROW_HOVER_GOLD.g, ROW_HOVER_GOLD.b, ROW_HOVER_ALPHA_LO)
+	var sel_hi := Color(ROW_SELECTED_COLOR.r, ROW_SELECTED_COLOR.g, ROW_SELECTED_COLOR.b, ROW_SELECTED_ALPHA)
+	var sel_lo := Color(ROW_SELECTED_COLOR.r, ROW_SELECTED_COLOR.g, ROW_SELECTED_COLOR.b, ROW_SELECTED_ALPHA_LO)
 
 	if hover:
-		highlight.visible = true
-		highlight.color = gold_lo
-		var tw := create_tween()
-		tw.set_loops(-1)
-		tw.set_trans(Tween.TRANS_SINE)
-		tw.set_ease(Tween.EASE_IN_OUT)
-		tw.tween_property(highlight, "color", gold_hi, ROW_HOVER_PULSE_SEC)
-		tw.tween_property(highlight, "color", gold_lo, ROW_HOVER_PULSE_SEC)
-		_row_hover_tweens[highlight] = tw
+		if row_idx == _selected_row_index:
+			_start_row_pulse(highlight, sel_hi, sel_lo)
+		else:
+			_start_row_pulse(highlight, gold_hi, gold_lo)
 	else:
 		if row_idx == _selected_row_index:
 			_set_row_selected_highlight(highlight, true)
@@ -883,8 +902,8 @@ func _select_index(idx: int) -> void:
 		_detail_icon.texture = entry.icon
 		_detail_icon.visible = true
 	else:
-		_detail_icon.texture = null
-		_detail_icon.visible = false
+		_detail_icon.texture = _make_temp_item_preview_texture()
+		_detail_icon.visible = true
 	_set_action_list_visible(true)
 	_refresh_selected_row_highlight()
 
@@ -904,14 +923,30 @@ func _clear_detail_panel() -> void:
 	_detail_value.add_theme_color_override("font_color", Color.WHITE)
 	_detail_description.text = ""
 	_detail_description.add_theme_color_override("font_color", Color.WHITE)
-	_detail_icon.texture = null
-	_detail_icon.visible = false
+	_detail_icon.texture = _make_temp_item_preview_texture()
+	_detail_icon.visible = true
 	_set_action_list_visible(false)
 
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_VISIBILITY_CHANGED and not visible:
 		_set_action_list_visible(false)
+
+
+func _make_temp_item_preview_texture() -> Texture2D:
+	var w := 96
+	var h := 96
+	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0.1, 0.1, 0.1, 1.0))
+	for y in range(h):
+		for x in range(w):
+			var border := x < 2 or y < 2 or x >= w - 2 or y >= h - 2
+			if border:
+				img.set_pixel(x, y, Color.WHITE)
+			elif (x + y) % 10 == 0:
+				img.set_pixel(x, y, Color(0.7, 0.7, 0.7, 1.0))
+	var tex := ImageTexture.create_from_image(img)
+	return tex
 
 
 func _rarity_display_string(r: ItemResource.Rarity) -> String:

@@ -277,9 +277,11 @@ grow_vertical = 2
 theme_override_constants/separation = 0
 
 [node name="TopHalf" type="TextureRect" parent="OuterMargin/MainContainer/RightPanel/RightDetail"]
+visible = false
+custom_minimum_size = Vector2(0, 0)
 layout_mode = 2
-size_flags_vertical = 3
-size_flags_stretch_ratio = 1.0
+size_flags_vertical = 0
+size_flags_stretch_ratio = 0.0
 expand_mode = 1
 stretch_mode = 5
 
@@ -307,6 +309,26 @@ layout_mode = 2
 bbcode_enabled = true
 scroll_active = false
 fit_content = true
+
+[node name="ItemPreviewWindow" type="Panel" parent="OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox"]
+custom_minimum_size = Vector2(0, 120)
+layout_mode = 2
+size_flags_vertical = 3
+size_flags_stretch_ratio = 0.4
+
+[node name="ItemPreviewImage" type="TextureRect" parent="OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/ItemPreviewWindow"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 6.0
+offset_top = 6.0
+offset_right = -6.0
+offset_bottom = -6.0
+grow_horizontal = 2
+grow_vertical = 2
+expand_mode = 1
+stretch_mode = 5
 
 [node name="CategoryLabel" type="Label" parent="OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox"]
 layout_mode = 2
