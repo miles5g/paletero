@@ -22,12 +22,16 @@ var _handle_zone: Area3D
 var _interaction_area: Area3D
 var _physics_dt: float = 1.0 / 60.0
 var _last_yaw_impulse: float = 0.0
+var _base_mass: float = 1.0
 
 var inventory_list: Array[ItemResource] = []
 
 func _ready() -> void:
 	add_to_group("carts")
+	_base_mass = mass
 	_stock_initial_inventory()
+	calculate_total_weight()
+	update_mass()
 	_handle_zone = Area3D.new()
 	_handle_zone.name = "HandleZone"
 	_handle_zone.monitoring = true
@@ -69,8 +73,25 @@ func add_item_to_inventory(new_item_resource: ItemResource) -> void:
 	for existing in inventory_list:
 		if existing.item_name == new_item_resource.item_name:
 			existing.quantity += new_item_resource.quantity
+			calculate_total_weight()
+			update_mass()
 			return
 	inventory_list.append(new_item_resource.duplicate(true))
+	calculate_total_weight()
+	update_mass()
+
+
+func calculate_total_weight() -> float:
+	var total := 0.0
+	for it in inventory_list:
+		if it is ItemResource:
+			total += it.weight_lbs * float(it.quantity)
+	return total
+
+
+func update_mass() -> void:
+	var total_weight := calculate_total_weight()
+	mass = maxf(1.0, _base_mass + total_weight)
 
 
 func _stock_initial_inventory() -> void:

@@ -16,8 +16,9 @@ const HEADER_GREY := Color(0.42, 0.46, 0.52)
 const HEADER_FONT_SZ := 11
 const SORT_BTN_FONT_SZ := 10
 const ROW_HOVER_PULSE_SEC := 0.5
-
-const _ROW_GLOW_SHADER: Shader = preload("res://inventory_row_glow.gdshader")
+const ROW_HOVER_GOLD := Color(1.0, 0.72, 0.18)
+const ROW_HOVER_ALPHA_HI := 0.42
+const ROW_HOVER_ALPHA_LO := 0.12
 
 var _sort_column: SortColumn = SortColumn.NAME
 var _sort_ascending: bool = true
@@ -32,6 +33,10 @@ var _detail_rarity: RichTextLabel
 var _detail_weight: Label
 var _detail_value: Label
 var _detail_description: Label
+var _action_list: VBoxContainer
+var _drop_button: Button
+var _trash_button: Button
+var _eat_button: Button
 
 var _cart: RigidBody3D = null
 var _entries: Array[ItemResource] = []
@@ -62,6 +67,19 @@ func _ready() -> void:
 	_detail_description = get_node(
 		"OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/DescriptionLabel"
 	) as Label
+	_action_list = get_node(
+		"OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/ActionList"
+	) as VBoxContainer
+	_drop_button = get_node(
+		"OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/ActionList/DropButton"
+	) as Button
+	_trash_button = get_node(
+		"OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/ActionList/TrashButton"
+	) as Button
+	_eat_button = get_node(
+		"OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/ActionList/EatButton"
+	) as Button
+	_set_action_list_visible(false)
 	call_deferred("_deferred_after_world_theme")
 
 
@@ -69,6 +87,9 @@ func _deferred_after_world_theme() -> void:
 	_style_list_headers()
 	_style_sort_buttons()
 	_connect_sort_buttons()
+	_connect_action_buttons()
+	_apply_selectable_golden_hover()
+	_style_action_buttons_bw()
 	_update_sort_button_icons()
 	if _detail_name:
 		_detail_name.add_theme_font_size_override("font_size", 17)
@@ -136,6 +157,42 @@ func _style_list_headers() -> void:
 		hdr_wt.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 
 
+func _transparent_stylebox() -> StyleBoxFlat:
+	var s := StyleBoxFlat.new()
+	s.bg_color = Color(0, 0, 0, 0)
+	return s
+
+
+func _golden_hover_stylebox(alpha: float) -> StyleBoxFlat:
+	var s := StyleBoxFlat.new()
+	s.bg_color = Color(ROW_HOVER_GOLD.r, ROW_HOVER_GOLD.g, ROW_HOVER_GOLD.b, alpha)
+	s.set_corner_radius_all(2)
+	s.set_border_width_all(0)
+	return s
+
+
+func _apply_selectable_golden_hover() -> void:
+	var transparent := _transparent_stylebox()
+	var hover_sb := _golden_hover_stylebox(0.38)
+	var pressed_sb := _golden_hover_stylebox(0.52)
+	var paths := [
+		"OuterMargin/MainContainer/LeftRailPanel/LeftRail/BtnManifest",
+		"OuterMargin/MainContainer/LeftRailPanel/LeftRail/BtnStats",
+		"OuterMargin/MainContainer/LeftRailPanel/LeftRail/BtnMap",
+		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrNameCell/SortNameBtn",
+		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrQtyCell/SortQtyBtn",
+		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrWtCell/SortWtBtn",
+	]
+	for p in paths:
+		var b := get_node_or_null(p) as Button
+		if b == null:
+			continue
+		b.add_theme_stylebox_override("normal", transparent.duplicate())
+		b.add_theme_stylebox_override("hover", hover_sb.duplicate())
+		b.add_theme_stylebox_override("pressed", pressed_sb.duplicate())
+		b.add_theme_stylebox_override("focus", transparent.duplicate())
+
+
 func _style_sort_buttons() -> void:
 	var paths := [
 		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrNameCell/SortNameBtn",
@@ -148,6 +205,30 @@ func _style_sort_buttons() -> void:
 			b.custom_minimum_size.x = SORT_BTN_WIDTH
 			b.add_theme_font_size_override("font_size", SORT_BTN_FONT_SZ)
 			b.add_theme_color_override("font_color", HEADER_GREY)
+
+
+func _style_action_buttons_bw() -> void:
+	var paths := [
+		"OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/ActionList/DropButton",
+		"OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/ActionList/TrashButton",
+		"OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/ActionList/EatButton",
+	]
+	for p in paths:
+		var b := get_node_or_null(p) as Button
+		if b == null:
+			continue
+		var normal := StyleBoxFlat.new()
+		normal.bg_color = Color.BLACK
+		normal.border_color = Color.WHITE
+		normal.set_border_width_all(1)
+		var hover := normal.duplicate() as StyleBoxFlat
+		hover.bg_color = Color(0.1, 0.1, 0.1, 1.0)
+		b.add_theme_stylebox_override("normal", normal)
+		b.add_theme_stylebox_override("pressed", normal.duplicate())
+		b.add_theme_stylebox_override("hover", hover)
+		b.add_theme_stylebox_override("focus", normal.duplicate())
+		b.add_theme_color_override("font_color", Color.WHITE)
+		b.flat = false
 
 
 func _connect_sort_buttons() -> void:
@@ -181,6 +262,15 @@ func _connect_sort_buttons() -> void:
 		hdr_qty_lab.gui_input.connect(_on_header_sort_gui_input.bind(SortColumn.QTY))
 	if hdr_wt_lab:
 		hdr_wt_lab.gui_input.connect(_on_header_sort_gui_input.bind(SortColumn.WT))
+
+
+func _connect_action_buttons() -> void:
+	if _drop_button and not _drop_button.pressed.is_connected(_on_drop_pressed):
+		_drop_button.pressed.connect(_on_drop_pressed)
+	if _trash_button and not _trash_button.pressed.is_connected(_on_trash_pressed):
+		_trash_button.pressed.connect(_on_trash_pressed)
+	if _eat_button and not _eat_button.pressed.is_connected(_on_eat_pressed):
+		_eat_button.pressed.connect(_on_eat_pressed)
 
 
 func _on_header_sort_gui_input(ev: InputEvent, which: SortColumn) -> void:
@@ -321,6 +411,74 @@ func _fill_item_list_rows() -> void:
 		i += 1
 
 
+func _set_action_list_visible(v: bool) -> void:
+	if _action_list:
+		_action_list.visible = v
+
+
+func _selected_entry() -> ItemResource:
+	if _selected_row_index < 0 or _selected_row_index >= _entries.size():
+		return null
+	return _entries[_selected_row_index]
+
+
+func _remove_selected_item_from_cart() -> ItemResource:
+	if _cart == null:
+		return null
+	var entry := _selected_entry()
+	if entry == null:
+		return null
+	var inv: Variant = _cart.get("inventory_list")
+	if inv == null:
+		return null
+	var list := inv as Array
+	var idx := list.find(entry)
+	if idx >= 0:
+		list.remove_at(idx)
+	if _cart.has_method("calculate_total_weight"):
+		_cart.calculate_total_weight()
+	if _cart.has_method("update_mass"):
+		_cart.update_mass()
+	return entry
+
+
+func _spawn_dropped_placeholder(item_name: String) -> void:
+	var scene := get_tree().current_scene
+	if scene == null:
+		return
+	var player := scene.get_node_or_null("Player") as Node3D
+	if player == null:
+		return
+	var box := CSGBox3D.new()
+	box.name = "Dropped_%s" % item_name.replace(" ", "_")
+	box.size = Vector3(0.35, 0.2, 0.35)
+	box.global_position = player.global_position + Vector3(0, 0.6, 0)
+	scene.add_child(box)
+
+
+func _on_trash_pressed() -> void:
+	var removed := _remove_selected_item_from_cart()
+	if removed == null:
+		return
+	refresh()
+
+
+func _on_eat_pressed() -> void:
+	var removed := _remove_selected_item_from_cart()
+	if removed == null:
+		return
+	print("Consumed %s" % removed.item_name)
+	refresh()
+
+
+func _on_drop_pressed() -> void:
+	var removed := _remove_selected_item_from_cart()
+	if removed == null:
+		return
+	_spawn_dropped_placeholder(removed.item_name)
+	refresh()
+
+
 func _on_sort_toggle(which: SortColumn) -> void:
 	if _sort_column == which:
 		_sort_ascending = not _sort_ascending
@@ -378,15 +536,7 @@ func refresh() -> void:
 
 	update_total_manifest_weight()
 	_update_sort_button_icons()
-
-	if _entries.size() > 0:
-		_select_index(0)
-
-
-func _dim_highlight_color(rc: Color) -> Color:
-	var d := rc.darkened(0.58)
-	d.a = 0.72
-	return d
+	_set_action_list_visible(false)
 
 
 func _make_inventory_row(entry: ItemResource, row_idx: int) -> Control:
@@ -405,11 +555,7 @@ func _make_inventory_row(entry: ItemResource, row_idx: int) -> Control:
 	highlight.offset_top = 0.0
 	highlight.offset_right = 0.0
 	highlight.offset_bottom = 0.0
-	var sm := ShaderMaterial.new()
-	sm.shader = _ROW_GLOW_SHADER
-	sm.set_shader_parameter("base_color", _dim_highlight_color(rc))
-	sm.set_shader_parameter("halo_boost", 1.05)
-	highlight.material = sm
+	highlight.color = Color(ROW_HOVER_GOLD.r, ROW_HOVER_GOLD.g, ROW_HOVER_GOLD.b, 0.0)
 
 	var h := HBoxContainer.new()
 	h.add_theme_constant_override("separation", COL_H_SEP)
@@ -476,45 +622,48 @@ func _make_inventory_row(entry: ItemResource, row_idx: int) -> Control:
 
 	var row_idx_captured := row_idx
 	shell.gui_input.connect(func (ev: InputEvent): _handle_row_click(ev, row_idx_captured))
-	shell.mouse_entered.connect(func (): _on_row_highlight_hover(highlight, rc, true))
-	shell.mouse_exited.connect(func (): _on_row_highlight_hover(highlight, rc, false))
+	shell.mouse_entered.connect(func (): _on_row_highlight_hover(highlight, true))
+	shell.mouse_exited.connect(func (): _on_row_highlight_hover(highlight, false))
 
 	return shell
 
 
-func _on_row_highlight_hover(highlight: ColorRect, rarity_color: Color, hover: bool) -> void:
+func _on_row_highlight_hover(highlight: ColorRect, hover: bool) -> void:
 	if not is_instance_valid(highlight):
 		return
-	var sm := highlight.material as ShaderMaterial
-	if sm:
-		sm.set_shader_parameter("base_color", _dim_highlight_color(rarity_color))
 	var prev: Tween = _row_hover_tweens.get(highlight, null)
 	if prev is Tween and (prev as Tween).is_valid():
 		(prev as Tween).kill()
 
+	var gold_hi := Color(ROW_HOVER_GOLD.r, ROW_HOVER_GOLD.g, ROW_HOVER_GOLD.b, ROW_HOVER_ALPHA_HI)
+	var gold_lo := Color(ROW_HOVER_GOLD.r, ROW_HOVER_GOLD.g, ROW_HOVER_GOLD.b, ROW_HOVER_ALPHA_LO)
+
 	if hover:
 		highlight.visible = true
-		highlight.modulate = Color(1.0, 1.0, 1.0, 0.0)
+		highlight.color = gold_lo
 		var tw := create_tween()
 		tw.set_loops(-1)
 		tw.set_trans(Tween.TRANS_SINE)
 		tw.set_ease(Tween.EASE_IN_OUT)
-		tw.tween_property(highlight, "modulate:a", 1.0, ROW_HOVER_PULSE_SEC)
-		tw.tween_property(highlight, "modulate:a", 0.0, ROW_HOVER_PULSE_SEC)
+		tw.tween_property(highlight, "color", gold_hi, ROW_HOVER_PULSE_SEC)
+		tw.tween_property(highlight, "color", gold_lo, ROW_HOVER_PULSE_SEC)
 		_row_hover_tweens[highlight] = tw
 	else:
 		var tw2 := create_tween()
 		tw2.set_trans(Tween.TRANS_QUAD)
 		tw2.set_ease(Tween.EASE_IN)
-		tw2.tween_property(highlight, "modulate:a", 0.0, 0.12)
+		var cend := Color(ROW_HOVER_GOLD.r, ROW_HOVER_GOLD.g, ROW_HOVER_GOLD.b, 0.0)
+		tw2.tween_property(highlight, "color", cend, 0.14)
 		tw2.finished.connect(func (): _hide_highlight_if_done(highlight))
 		_row_hover_tweens[highlight] = tw2
 
 
 func _hide_highlight_if_done(highlight: ColorRect) -> void:
-	if is_instance_valid(highlight) and highlight.modulate.a <= 0.01:
+	if not is_instance_valid(highlight):
+		return
+	if highlight.color.a <= 0.02:
 		highlight.visible = false
-		highlight.modulate = Color.WHITE
+		highlight.color = Color(ROW_HOVER_GOLD.r, ROW_HOVER_GOLD.g, ROW_HOVER_GOLD.b, 0.0)
 
 
 func _handle_row_click(ev: InputEvent, row_idx: int) -> void:
@@ -527,6 +676,7 @@ func _handle_row_click(ev: InputEvent, row_idx: int) -> void:
 func _select_index(idx: int) -> void:
 	if idx < 0 or idx >= _entries.size():
 		return
+	_set_action_list_visible(false)
 	_selected_row_index = idx
 	var entry := _entries[idx]
 	var rc := _rarity_color(entry.rarity)
@@ -552,6 +702,7 @@ func _select_index(idx: int) -> void:
 	else:
 		_detail_icon.texture = null
 		_detail_icon.visible = false
+	_set_action_list_visible(true)
 
 
 func _clear_detail_panel() -> void:
@@ -569,6 +720,12 @@ func _clear_detail_panel() -> void:
 	_detail_description.add_theme_color_override("font_color", Color.WHITE)
 	_detail_icon.texture = null
 	_detail_icon.visible = false
+	_set_action_list_visible(false)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_VISIBILITY_CHANGED and not visible:
+		_set_action_list_visible(false)
 
 
 func _rarity_display_string(r: ItemResource.Rarity) -> String:

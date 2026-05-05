@@ -279,3 +279,20 @@ layout_mode = 2
 size_flags_vertical = 3
 text = " "
 autowrap_mode = 3
+
+[node name="ActionList" type="VBoxContainer" parent="OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="DropButton" type="Button" parent="OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/ActionList"]
+layout_mode = 2
+text = "[ DROP ]"
+
+[node name="TrashButton" type="Button" parent="OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/ActionList"]
+layout_mode = 2
+text = "[ TRASH ]"
+
+[node name="EatButton" type="Button" parent="OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/ActionList"]
+layout_mode = 2
+text = "[ EAT ]"
