@@ -193,6 +193,13 @@ func set_grab_prompts_visible(v: bool) -> void:
 			(c as Control).visible = v
 
 
+func set_interaction_prompt_text(msg: String) -> void:
+	var lab := get_node_or_null("HUD/InteractionPrompts/InteractionLabel") as Label
+	if lab == null:
+		return
+	lab.text = msg
+
+
 func _ready() -> void:
 	var hud := CanvasLayer.new()
 	hud.name = "HUD"

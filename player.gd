@@ -6,6 +6,11 @@ const CROUCH_SPEED: float = BASE_SPEED * 0.5
 const JUMP_VELOCITY: float = 4.5
 ## Max walk speed while hitched (higher than old cap so pushing feels brisk).
 const PUSH_MOVE_SPEED_CAP: float = 6.2
+const HELD_ITEM_DIST: float = 0.95
+const HELD_ITEM_SIDE: float = 0.0
+const HELD_ITEM_HEIGHT: float = 1.0
+const PICKUP_RAY_DIST: float = 10.0
+const PICKUP_NEAR_DIST: float = 2.6
 
 @export var push_force: float = 2.0
 @export var mouse_sensitivity: float = 0.0025
@@ -44,6 +49,10 @@ var _push_arm_l: MeshInstance3D = null
 var _push_arm_r: MeshInstance3D = null
 var _push_forearm_l: MeshInstance3D = null
 var _push_forearm_r: MeshInstance3D = null
+var _look_pickup_item: PhysicalItem = null
+var _held_item: PhysicalItem = null
+var _held_item_prev_layer: int = 1
+var _held_item_prev_mask: int = 1
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -79,6 +88,7 @@ func _unhandled_input(event: InputEvent) -> void:
 func _physics_process(delta: float) -> void:
 	if Input.is_action_just_pressed("toggle_inventory") and _can_toggle_cart_inventory():
 		_toggle_inventory_menu()
+	_update_pickup_target_and_prompt()
 	if Input.is_action_just_pressed("interact"):
 		_interact()
 
@@ -112,6 +122,7 @@ func _physics_process(delta: float) -> void:
 		velocity.z = move_toward(velocity.z, 0, move_speed)
 
 	move_and_slide()
+	_update_held_item_transform()
 
 	if is_pushing and current_cart != null:
 		current_cart.sleeping = false
@@ -127,6 +138,15 @@ func _physics_process(delta: float) -> void:
 			body.apply_central_impulse(force_dir * velocity.length() * push_force)
 
 func _interact() -> void:
+	if _held_item != null:
+		var cart_for_store := _resolve_cart_for_inventory()
+		if cart_for_store != null and cart_for_store.has_method("is_player_in_grab_range") and cart_for_store.is_player_in_grab_range(self):
+			_store_held_item_in_cart(cart_for_store)
+		else:
+			_drop_held_item()
+		return
+	if _try_hold_targeted_item():
+		return
 	if is_pushing:
 		_detach_from_cart()
 		return
@@ -136,6 +156,148 @@ func _interact() -> void:
 		if cart is RigidBody3D and cart.has_method("is_player_in_grab_range") and cart.is_player_in_grab_range(self):
 			_attach_to_cart(cart)
 			return
+
+
+func _try_hold_targeted_item() -> bool:
+	if _look_pickup_item == null or not is_instance_valid(_look_pickup_item):
+		return false
+	_held_item = _look_pickup_item
+	_look_pickup_item = null
+	_held_item_prev_layer = _held_item.collision_layer
+	_held_item_prev_mask = _held_item.collision_mask
+	_held_item.freeze = true
+	_held_item.sleeping = true
+	_held_item.collision_layer = 0
+	_held_item.collision_mask = 0
+	_held_item.linear_velocity = Vector3.ZERO
+	_held_item.angular_velocity = Vector3.ZERO
+	_update_held_item_transform()
+	var w := get_parent()
+	if w != null and w.has_method("set_interaction_prompt_text"):
+		w.set_interaction_prompt_text("[E] Drop %s" % _held_item.display_name())
+	return true
+
+
+func _store_held_item_in_cart(cart: RigidBody3D) -> void:
+	if _held_item == null or not is_instance_valid(_held_item):
+		return
+	if not cart.has_method("add_item_to_inventory"):
+		return
+	var res: ItemResource = _held_item.take_item_resource()
+	if res == null:
+		_drop_held_item()
+		return
+	cart.add_item_to_inventory(res)
+	_held_item.queue_free()
+	_held_item = null
+	if cart.has_method("calculate_total_weight"):
+		cart.calculate_total_weight()
+	if cart.has_method("update_mass"):
+		cart.update_mass()
+	var panel := _inventory_menu_panel()
+	if panel != null and panel.visible and panel.has_method("refresh"):
+		panel.refresh()
+
+
+func _drop_held_item() -> void:
+	if _held_item == null or not is_instance_valid(_held_item):
+		_held_item = null
+		return
+	_held_item.freeze = false
+	_held_item.sleeping = false
+	_held_item.collision_layer = _held_item_prev_layer
+	_held_item.collision_mask = _held_item_prev_mask
+	var fwd := -global_transform.basis.z
+	fwd.y = 0.0
+	if fwd.length_squared() < 1e-6:
+		fwd = Vector3.FORWARD
+	fwd = fwd.normalized()
+	_held_item.global_position = global_position + fwd * 1.0 + Vector3.UP * 0.8
+	_held_item.apply_central_impulse(fwd * 1.1 + Vector3.UP * 0.2)
+	_held_item = null
+
+
+func _update_held_item_transform() -> void:
+	if _held_item == null or not is_instance_valid(_held_item):
+		return
+	var fwd := -global_transform.basis.z
+	fwd.y = 0.0
+	if fwd.length_squared() < 1e-6:
+		fwd = Vector3.FORWARD
+	fwd = fwd.normalized()
+	var right := global_transform.basis.x
+	right.y = 0.0
+	if right.length_squared() < 1e-6:
+		right = Vector3.RIGHT
+	right = right.normalized()
+	var chest := global_position + Vector3.UP * HELD_ITEM_HEIGHT
+	var hold_pos := chest + fwd * HELD_ITEM_DIST + right * HELD_ITEM_SIDE
+	_held_item.global_position = hold_pos
+	_held_item.global_basis = Basis.looking_at(fwd, Vector3.UP)
+
+
+func _looked_physical_item() -> PhysicalItem:
+	if _camera == null:
+		return null
+	var from := _camera.global_transform.origin
+	var to := from + (-_camera.global_transform.basis.z) * PICKUP_RAY_DIST
+	var q := PhysicsRayQueryParameters3D.create(from, to)
+	q.exclude = [get_rid()]
+	q.collision_mask = 0xFFFFFFFF
+	var hit: Dictionary = get_world_3d().direct_space_state.intersect_ray(q)
+	if hit.is_empty():
+		return _nearest_physical_item()
+	if hit.has("collider"):
+		var collider: Object = hit["collider"] as Object
+		if collider is PhysicalItem:
+			return collider as PhysicalItem
+	return _nearest_physical_item()
+
+
+func _nearest_physical_item() -> PhysicalItem:
+	var nearest: PhysicalItem = null
+	var nearest_d2 := PICKUP_NEAR_DIST * PICKUP_NEAR_DIST
+	var origin := global_position
+	for n in get_tree().get_nodes_in_group("physical_items"):
+		var item := n as PhysicalItem
+		if item == null or not is_instance_valid(item):
+			continue
+		var d2 := origin.distance_squared_to(item.global_position)
+		if d2 <= nearest_d2:
+			nearest_d2 = d2
+			nearest = item
+	return nearest
+
+
+func _update_pickup_target_and_prompt() -> void:
+	if _is_inventory_menu_open():
+		return
+	var w := get_parent()
+	if w == null:
+		return
+	if _held_item != null and is_instance_valid(_held_item):
+		var hold_name := _held_item.display_name()
+		var cart_for_store := _resolve_cart_for_inventory()
+		if cart_for_store != null and cart_for_store.has_method("is_player_in_grab_range") and cart_for_store.is_player_in_grab_range(self):
+			if w.has_method("set_interaction_prompt_text") and w.has_method("set_grab_prompts_visible"):
+				w.set_interaction_prompt_text("[E] Store %s in cart" % hold_name)
+				w.set_grab_prompts_visible(true)
+			return
+		if w.has_method("set_interaction_prompt_text") and w.has_method("set_grab_prompts_visible"):
+			w.set_interaction_prompt_text("[E] Drop %s" % hold_name)
+			w.set_grab_prompts_visible(true)
+		return
+	var looked := _looked_physical_item()
+	_look_pickup_item = looked
+	if looked != null and w.has_method("set_interaction_prompt_text") and w.has_method("set_grab_prompts_visible"):
+		w.set_interaction_prompt_text("[E] Pick up %s" % looked.display_name())
+		w.set_grab_prompts_visible(true)
+		return
+	if can_interact and w.has_method("set_interaction_prompt_text") and w.has_method("set_grab_prompts_visible"):
+		w.set_interaction_prompt_text("[E] Grab Cart")
+		w.set_grab_prompts_visible(true)
+	elif not can_interact and w.has_method("set_grab_prompts_visible"):
+		w.set_grab_prompts_visible(false)
 
 func _attach_to_cart(cart: RigidBody3D) -> void:
 	if current_cart != null and current_cart != cart:

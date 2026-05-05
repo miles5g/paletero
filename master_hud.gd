@@ -31,6 +31,7 @@ const ROW_HOVER_ALPHA_LO := 0.12
 const ROW_SELECTED_COLOR := Color(1.0, 0.98, 0.82)
 const ROW_SELECTED_ALPHA := 0.62
 const ROW_SELECTED_ALPHA_LO := 0.28
+const _PHYSICAL_ITEM_SCENE: PackedScene = preload("res://PhysicalItem.tscn")
 
 var _sort_column: SortColumn = SortColumn.NAME
 var _sort_ascending: bool = true
@@ -63,6 +64,7 @@ var _cart: RigidBody3D = null
 var _entries: Array[ItemResource] = []
 
 var _row_hover_tweens: Dictionary = {}
+var _row_pulse_targets: Dictionary = {}
 
 
 func _ready() -> void:
@@ -354,15 +356,15 @@ func _show_section(section: Section) -> void:
 func _update_nav_button_highlight() -> void:
 	var transparent := _transparent_stylebox()
 	var active := _golden_hover_stylebox(0.45)
-	var mapping := {
-		_btn_manifest: Section.MANIFEST,
-		_btn_stats: Section.STATS,
-		_btn_map: Section.MAP,
-	}
-	for b in mapping.keys():
+	var buttons := [_btn_manifest, _btn_stats, _btn_map]
+	for b in buttons:
 		if b == null:
 			continue
-		var sec: Section = mapping[b]
+		var sec: Section = Section.MANIFEST
+		if b == _btn_stats:
+			sec = Section.STATS
+		elif b == _btn_map:
+			sec = Section.MAP
 		b.add_theme_stylebox_override("normal", (active if _active_section == sec else transparent).duplicate())
 
 
@@ -637,6 +639,7 @@ func _fill_item_list_rows() -> void:
 		if tw is Tween and (tw as Tween).is_valid():
 			(tw as Tween).kill()
 	_row_hover_tweens.clear()
+	_row_pulse_targets.clear()
 	for c in _item_list.get_children():
 		c.queue_free()
 	var i := 0
@@ -677,18 +680,21 @@ func _remove_selected_item_from_cart() -> ItemResource:
 	return entry
 
 
-func _spawn_dropped_placeholder(item_name: String) -> void:
+func _spawn_dropped_placeholder(item_name: String, item: ItemResource) -> void:
 	var scene := get_tree().current_scene
 	if scene == null:
 		return
 	var player := scene.get_node_or_null("Player") as Node3D
 	if player == null:
 		return
-	var box := CSGBox3D.new()
-	box.name = "Dropped_%s" % item_name.replace(" ", "_")
-	box.size = Vector3(0.35, 0.2, 0.35)
-	box.global_position = player.global_position + Vector3(0, 0.6, 0)
-	scene.add_child(box)
+	var body: PhysicalItem = _PHYSICAL_ITEM_SCENE.instantiate() as PhysicalItem
+	if body == null:
+		return
+	body.name = "Dropped_%s" % item_name.replace(" ", "_")
+	if item != null:
+		body.set_item_resource(item)
+	scene.add_child(body)
+	body.global_position = player.global_position + Vector3(0, 0.8, 0)
 
 
 func _on_trash_pressed() -> void:
@@ -710,7 +716,7 @@ func _on_drop_pressed() -> void:
 	var removed := _remove_selected_item_from_cart()
 	if removed == null:
 		return
-	_spawn_dropped_placeholder(removed.item_name)
+	_spawn_dropped_placeholder(removed.item_name, removed)
 	refresh()
 
 
@@ -918,15 +924,40 @@ func _make_inventory_row(entry: ItemResource, row_idx: int) -> Control:
 
 
 func _start_row_pulse(highlight: ColorRect, col_hi: Color, col_lo: Color) -> void:
+	_row_pulse_targets[highlight] = [col_hi, col_lo]
+	_run_row_pulse_once(highlight, col_hi, col_lo)
+
+
+func _run_row_pulse_once(highlight: ColorRect, col_hi: Color, col_lo: Color) -> void:
+	if not is_instance_valid(highlight):
+		return
 	highlight.visible = true
 	highlight.color = col_lo
 	var tw := create_tween()
-	tw.set_loops(-1)
 	tw.set_trans(Tween.TRANS_SINE)
 	tw.set_ease(Tween.EASE_IN_OUT)
 	tw.tween_property(highlight, "color", col_hi, ROW_HOVER_PULSE_SEC)
 	tw.tween_property(highlight, "color", col_lo, ROW_HOVER_PULSE_SEC)
+	tw.finished.connect(_on_row_pulse_finished.bind(highlight.get_instance_id()))
 	_row_hover_tweens[highlight] = tw
+
+
+func _on_row_pulse_finished(highlight_id: int) -> void:
+	var obj := instance_from_id(highlight_id)
+	var highlight := obj as ColorRect
+	if highlight == null or not is_instance_valid(highlight):
+		return
+	if not _row_pulse_targets.has(highlight):
+		_row_hover_tweens.erase(highlight)
+		return
+	var colors: Array = _row_pulse_targets[highlight]
+	if colors.size() < 2:
+		_row_pulse_targets.erase(highlight)
+		_row_hover_tweens.erase(highlight)
+		return
+	var hi: Color = colors[0]
+	var lo: Color = colors[1]
+	_run_row_pulse_once(highlight, hi, lo)
 
 
 func _set_row_selected_highlight(highlight: ColorRect, selected: bool) -> void:
@@ -940,6 +971,7 @@ func _set_row_selected_highlight(highlight: ColorRect, selected: bool) -> void:
 		var sel_lo := Color(ROW_SELECTED_COLOR.r, ROW_SELECTED_COLOR.g, ROW_SELECTED_COLOR.b, ROW_SELECTED_ALPHA_LO)
 		_start_row_pulse(highlight, sel_hi, sel_lo)
 	else:
+		_row_pulse_targets.erase(highlight)
 		highlight.visible = false
 		highlight.color = Color(ROW_HOVER_GOLD.r, ROW_HOVER_GOLD.g, ROW_HOVER_GOLD.b, 0.0)
 
@@ -978,6 +1010,7 @@ func _on_row_highlight_hover(highlight: ColorRect, row_idx: int, hover: bool) ->
 		if row_idx == _selected_row_index:
 			_set_row_selected_highlight(highlight, true)
 			return
+		_row_pulse_targets.erase(highlight)
 		var tw2 := create_tween()
 		tw2.set_trans(Tween.TRANS_QUAD)
 		tw2.set_ease(Tween.EASE_IN)
