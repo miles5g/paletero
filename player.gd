@@ -70,13 +70,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 			return
-	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and _camera:
+	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and _camera and not _is_inventory_menu_open():
 		rotate_y(-event.relative.x * mouse_sensitivity)
 		_camera.rotate_object_local(Vector3.RIGHT, -event.relative.y * mouse_sensitivity)
 		var pitch := _camera.rotation_degrees.x
 		_camera.rotation_degrees.x = clampf(pitch, -80.0, 80.0)
 
 func _physics_process(delta: float) -> void:
+	if Input.is_action_just_pressed("toggle_inventory") and _can_toggle_cart_inventory():
+		_toggle_inventory_menu()
 	if Input.is_action_just_pressed("interact"):
 		_interact()
 
@@ -142,9 +144,9 @@ func _attach_to_cart(cart: RigidBody3D) -> void:
 	is_pushing = true
 	can_interact = false
 	add_collision_exception_with(cart)
-	var lbl := get_parent().get_node_or_null("HUD/InteractionLabel") as Label
-	if lbl:
-		lbl.visible = false
+	var w := get_parent()
+	if w != null and w.has_method("set_grab_prompts_visible"):
+		w.set_grab_prompts_visible(false)
 	_hitch_distance = hitch_nominal_distance
 	_hitch_dy = cart.global_position.y - global_position.y
 	var face := -global_transform.basis.z
@@ -229,8 +231,8 @@ func _clamp_arm_reach_target(shoulder: Vector3, desired_target: Vector3) -> Vect
 
 func _arm_elbow_target(shoulder: Vector3, hand_target: Vector3, side_sign: float) -> Vector3:
 	var dir := hand_target - shoulder
-	var len := dir.length()
-	if len < 0.05:
+	var reach_len := dir.length()
+	if reach_len < 0.05:
 		return shoulder + global_transform.basis * Vector3(0.0, -0.12, -0.08)
 	var mid := shoulder + dir * 0.5
 	var b := global_transform.basis
@@ -238,7 +240,7 @@ func _arm_elbow_target(shoulder: Vector3, hand_target: Vector3, side_sign: float
 	var bend_down := -b.y * 0.11
 	# Slight backward bow adds loose, organic bend while keeping hands attached.
 	var bend_back := b.z * 0.08
-	var bend_scale := clampf(len / 2.0, 0.55, 1.0)
+	var bend_scale := clampf(reach_len / 2.0, 0.55, 1.0)
 	return mid + (bend_out + bend_down + bend_back) * bend_scale
 
 func _update_push_arms_visual() -> void:
@@ -312,13 +314,60 @@ func _detach_from_cart() -> void:
 		remove_collision_exception_with(cart)
 	is_pushing = false
 	can_interact = cart != null and cart.has_method("is_player_in_grab_range") and cart.is_player_in_grab_range(self)
-	var lbl := get_parent().get_node_or_null("HUD/InteractionLabel") as Label
-	if lbl:
-		lbl.visible = can_interact
+	var wp := get_parent()
+	if wp != null and wp.has_method("set_grab_prompts_visible"):
+		wp.set_grab_prompts_visible(can_interact)
 	current_cart = null
 
 func _exit_tree() -> void:
 	_detach_from_cart()
+
+
+func _inventory_menu_panel() -> Panel:
+	var w := get_parent()
+	if w == null:
+		return null
+	return w.get_node_or_null("HUD/InventoryMenu") as Panel
+
+
+func _is_inventory_menu_open() -> bool:
+	var panel := _inventory_menu_panel()
+	return panel != null and panel.visible
+
+
+func _can_toggle_cart_inventory() -> bool:
+	if is_pushing:
+		return true
+	for c in get_tree().get_nodes_in_group("carts"):
+		if c is RigidBody3D and c.has_method("is_player_in_grab_range") and c.is_player_in_grab_range(self):
+			return true
+	return false
+
+
+func _resolve_cart_for_inventory() -> RigidBody3D:
+	if is_pushing and current_cart != null and is_instance_valid(current_cart):
+		return current_cart
+	for c in get_tree().get_nodes_in_group("carts"):
+		if c is RigidBody3D and c.has_method("is_player_in_grab_range") and c.is_player_in_grab_range(self):
+			return c
+	return null
+
+
+func _toggle_inventory_menu() -> void:
+	var panel := _inventory_menu_panel()
+	if panel == null:
+		return
+	panel.visible = not panel.visible
+	if panel.visible:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		var cart := _resolve_cart_for_inventory()
+		if cart != null and panel.has_method("bind_cart"):
+			panel.bind_cart(cart)
+		if panel.has_method("refresh"):
+			panel.refresh()
+	else:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
 
 func _can_uncrouch_to_stand() -> bool:
 	if _collision_shape == null or _capsule_shape == null:

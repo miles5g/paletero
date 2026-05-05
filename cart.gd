@@ -23,8 +23,11 @@ var _interaction_area: Area3D
 var _physics_dt: float = 1.0 / 60.0
 var _last_yaw_impulse: float = 0.0
 
+var inventory_list: Array[ItemResource] = []
+
 func _ready() -> void:
 	add_to_group("carts")
+	_stock_initial_paleta()
 	_handle_zone = Area3D.new()
 	_handle_zone.name = "HandleZone"
 	_handle_zone.monitoring = true
@@ -59,6 +62,28 @@ func _ready() -> void:
 	_interaction_area.body_exited.connect(_on_interaction_area_body_exited)
 	call_deferred("_sync_area_masks_to_player_layer")
 
+
+func add_item_to_inventory(new_item_resource: ItemResource) -> void:
+	if new_item_resource == null:
+		return
+	for existing in inventory_list:
+		if existing.item_name == new_item_resource.item_name:
+			existing.quantity += new_item_resource.quantity
+			return
+	inventory_list.append(new_item_resource.duplicate(true))
+
+
+func _stock_initial_paleta() -> void:
+	var lime := ItemResource.new()
+	lime.item_name = "Lime Paleta"
+	lime.quantity = 1
+	lime.weight_lbs = 1.0
+	lime.value_usd = 1.50
+	lime.description = "Tart lime frozen fruit bar."
+	lime.rarity = ItemResource.Rarity.GREEN
+	add_item_to_inventory(lime)
+
+
 func _physics_process(delta: float) -> void:
 	_physics_dt = delta
 
@@ -73,29 +98,23 @@ func _sync_area_masks_to_player_layer() -> void:
 	_handle_zone.collision_mask = mask
 	_interaction_area.collision_mask = mask
 
-func _hud_interaction_label() -> Label:
-	var w := get_parent()
-	if w == null:
-		return null
-	return w.get_node_or_null("HUD/InteractionLabel") as Label
-
 func _on_interaction_area_body_entered(body: Node3D) -> void:
 	if not body is CharacterBody3D or body.name != &"Player":
 		return
 	if body.is_pushing:
 		return
 	body.can_interact = true
-	var lbl := _hud_interaction_label()
-	if lbl:
-		lbl.visible = true
+	var w := get_parent()
+	if w != null and w.has_method("set_grab_prompts_visible"):
+		w.set_grab_prompts_visible(true)
 
 func _on_interaction_area_body_exited(body: Node3D) -> void:
 	if not body is CharacterBody3D or body.name != &"Player":
 		return
 	body.can_interact = false
-	var lbl := _hud_interaction_label()
-	if lbl:
-		lbl.visible = false
+	var w := get_parent()
+	if w != null and w.has_method("set_grab_prompts_visible"):
+		w.set_grab_prompts_visible(false)
 
 func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	var local_v: Vector3 = state.transform.basis.inverse() * state.linear_velocity

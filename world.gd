@@ -41,7 +41,6 @@ func _make_wet_asphalt_material(albedo_tex: Texture2D, uv_scale: Vector3) -> Sta
 	_apply_floor_texture_rules(m, albedo_tex, uv_scale)
 	m.roughness = 0.1
 	m.metallic = 0.0
-	m.specular = 1.0
 	return m
 
 
@@ -51,7 +50,6 @@ func _make_dark_concrete_material(albedo_tex: Texture2D, uv_scale: Vector3) -> S
 	_apply_floor_texture_rules(m, albedo_tex, uv_scale)
 	m.roughness = 0.92
 	m.metallic = 0.0
-	m.specular = 0.32
 	return m
 
 
@@ -61,7 +59,6 @@ func _make_curb_material(albedo_tex: Texture2D, uv_scale: Vector3) -> StandardMa
 	_apply_floor_texture_rules(m, albedo_tex, uv_scale)
 	m.roughness = 0.88
 	m.metallic = 0.0
-	m.specular = 0.28
 	return m
 
 
@@ -145,22 +142,126 @@ func _build_street_layout(root: Node3D) -> void:
 	)
 
 
+func set_grab_prompts_visible(v: bool) -> void:
+	var box := get_node_or_null("HUD/InteractionPrompts") as Control
+	if box == null:
+		return
+	box.visible = v
+	for c in box.get_children():
+		if c is Control:
+			(c as Control).visible = v
+
+
+func _create_inventory_menu() -> Panel:
+	var panel := Panel.new()
+	panel.name = "InventoryMenu"
+	panel.visible = false
+	panel.anchor_left = 0.5
+	panel.anchor_right = 0.5
+	panel.anchor_top = 0.5
+	panel.anchor_bottom = 0.5
+	panel.offset_left = -280.0
+	panel.offset_top = -190.0
+	panel.offset_right = 280.0
+	panel.offset_bottom = 190.0
+	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+
+	var margin := MarginContainer.new()
+	margin.name = "MarginContainer"
+	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	margin.add_theme_constant_override("margin_left", 14)
+	margin.add_theme_constant_override("margin_top", 14)
+	margin.add_theme_constant_override("margin_right", 14)
+	margin.add_theme_constant_override("margin_bottom", 14)
+	panel.add_child(margin)
+
+	var hsplit := HSplitContainer.new()
+	hsplit.name = "HSplitContainer"
+	hsplit.set_anchors_preset(Control.PRESET_FULL_RECT)
+	margin.add_child(hsplit)
+
+	var scroll := ScrollContainer.new()
+	scroll.name = "ScrollContainer"
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.custom_minimum_size = Vector2(220, 0)
+	var item_vbox := VBoxContainer.new()
+	item_vbox.name = "ItemListVBox"
+	scroll.add_child(item_vbox)
+	hsplit.add_child(scroll)
+
+	var right_col := VBoxContainer.new()
+	right_col.name = "DetailsColumn"
+	right_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right_col.add_theme_constant_override("separation", 8)
+
+	var icon := TextureRect.new()
+	icon.name = "DetailIcon"
+	icon.custom_minimum_size = Vector2(112, 112)
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+
+	var name_lbl := Label.new()
+	name_lbl.name = "DetailName"
+	name_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+	var desc_lbl := Label.new()
+	desc_lbl.name = "DetailDescription"
+	desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc_lbl.size_flags_vertical = Control.SIZE_EXPAND_FILL
+
+	var weight_lbl := Label.new()
+	weight_lbl.name = "DetailWeight"
+
+	var value_lbl := Label.new()
+	value_lbl.name = "DetailValue"
+
+	right_col.add_child(icon)
+	right_col.add_child(name_lbl)
+	right_col.add_child(desc_lbl)
+	right_col.add_child(weight_lbl)
+	right_col.add_child(value_lbl)
+	hsplit.add_child(right_col)
+
+	panel.set_script(load("res://inventory_menu.gd"))
+	return panel
+
+
 func _ready() -> void:
 	var hud := CanvasLayer.new()
 	hud.name = "HUD"
+
+	var prompt_box := VBoxContainer.new()
+	prompt_box.name = "InteractionPrompts"
+	prompt_box.visible = false
+	prompt_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	prompt_box.anchor_left = 0.0
+	prompt_box.anchor_right = 1.0
+	prompt_box.anchor_top = 1.0
+	prompt_box.anchor_bottom = 1.0
+	prompt_box.offset_top = -72.0
+	prompt_box.offset_bottom = -12.0
+	prompt_box.alignment = BoxContainer.ALIGNMENT_CENTER
+
+	var inventory_prompt := Label.new()
+	inventory_prompt.name = "InventoryPromptLabel"
+	inventory_prompt.text = "[Tab] Inventory"
+	inventory_prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	inventory_prompt.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+
 	var interaction_label := Label.new()
 	interaction_label.name = "InteractionLabel"
 	interaction_label.text = "[E] Grab Cart"
-	interaction_label.visible = false
 	interaction_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	interaction_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	hud.add_child(interaction_label)
-	interaction_label.anchor_left = 0.0
-	interaction_label.anchor_right = 1.0
-	interaction_label.anchor_top = 1.0
-	interaction_label.anchor_bottom = 1.0
-	interaction_label.offset_top = -52.0
-	interaction_label.offset_bottom = -12.0
+
+	prompt_box.add_child(inventory_prompt)
+	prompt_box.add_child(interaction_label)
+	hud.add_child(prompt_box)
+
+	var inv_menu := _create_inventory_menu()
+	hud.add_child(inv_menu)
+
 	add_child(hud)
 
 	# Gritty world mood: dark overcast sky + dense fog.
@@ -245,6 +346,10 @@ func _ready() -> void:
 	var interaction_area := cart.get_node_or_null("InteractionArea") as Area3D
 	if interaction_area:
 		interaction_area.position = Vector3(0, 0, 0.75)
+
+	var inv_panel := get_node_or_null("HUD/InventoryMenu") as Panel
+	if inv_panel != null and inv_panel.has_method("bind_cart"):
+		inv_panel.bind_cart(cart)
 
 	# 4. Spawn the Player
 	_spawn_player()
