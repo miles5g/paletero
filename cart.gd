@@ -102,6 +102,7 @@ func _stock_initial_inventory() -> void:
 	lime.value_usd = 1.50
 	lime.description = "Tart lime frozen fruit bar."
 	lime.rarity = ItemResource.Rarity.GREEN
+	lime.category = ItemResource.Category.FOOD
 	add_item_to_inventory(lime)
 
 	var ice := ItemResource.new()
@@ -111,6 +112,7 @@ func _stock_initial_inventory() -> void:
 	ice.value_usd = 10.00
 	ice.description = "Keeps the cart cold. Heavy but necessary."
 	ice.rarity = ItemResource.Rarity.BLUE
+	ice.category = ItemResource.Category.UTILITY
 	add_item_to_inventory(ice)
 
 	var recipe := ItemResource.new()
@@ -120,6 +122,7 @@ func _stock_initial_inventory() -> void:
 	recipe.value_usd = 500.00
 	recipe.description = "A handwritten note with the perfect flavor ratios. Priceless."
 	recipe.rarity = ItemResource.Rarity.GOLD
+	recipe.category = ItemResource.Category.UTILITY
 	add_item_to_inventory(recipe)
 
 	var cooler := ItemResource.new()
@@ -129,6 +132,7 @@ func _stock_initial_inventory() -> void:
 	cooler.value_usd = 250.00
 	cooler.description = "A heavy-duty compressor. Makes the cart significantly heavier."
 	cooler.rarity = ItemResource.Rarity.GOLD
+	cooler.category = ItemResource.Category.UTILITY
 	add_item_to_inventory(cooler)
 
 

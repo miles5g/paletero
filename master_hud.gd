@@ -1,20 +1,27 @@
 extends Panel
 
-enum SortColumn { NAME, QTY, WT }
+enum SortColumn { NAME, CAT, QTY, WT, VAL }
 
 ## Matches HeaderRow column widths in MasterHUD.tscn (pixel-aligned with rows)
 const COL_QTY_WIDTH: int = 44
+const COL_CAT_WIDTH: int = 30
 const COL_H_SEP: int = 6
 const COL_WT_WIDTH: int = 72
-const SORT_BTN_WIDTH: int = 22
-const SORT_HDR_INNER_SEP: int = 2
+const COL_VAL_WIDTH: int = 52
+const SORT_BTN_WIDTH: int = 12
+const SORT_HDR_INNER_SEP: int = 0
 const SORT_NAME_BTN_SEP: int = 0
-const NAME_COL_LEFT_INSET: int = 6
+const NAME_COL_LEFT_INSET: int = 0
 const COL_QTY_CELL_WIDTH: int = COL_QTY_WIDTH + SORT_HDR_INNER_SEP + SORT_BTN_WIDTH
+const COL_CAT_CELL_WIDTH: int = COL_CAT_WIDTH + SORT_HDR_INNER_SEP + SORT_BTN_WIDTH
 const COL_WT_CELL_WIDTH: int = COL_WT_WIDTH + SORT_HDR_INNER_SEP + SORT_BTN_WIDTH
+const COL_VAL_CELL_WIDTH: int = COL_VAL_WIDTH + SORT_HDR_INNER_SEP + SORT_BTN_WIDTH
+const NAME_COL_STRETCH: float = 4.0
+const META_COL_STRETCH: float = 1.0
+const META_LABEL_MIN_WIDTH: int = 10
 const HEADER_GREY := Color(0.42, 0.46, 0.52)
 const HEADER_FONT_SZ := 11
-const SORT_BTN_FONT_SZ := 10
+const SORT_BTN_FONT_SZ := 9
 const ROW_HOVER_PULSE_SEC := 0.5
 const ROW_HOVER_GOLD := Color(1.0, 0.72, 0.18)
 const ROW_HOVER_ALPHA_HI := 0.42
@@ -30,6 +37,7 @@ var _total_weight_label: Label
 var _detail_icon: TextureRect
 var _detail_name: Label
 var _detail_rarity: RichTextLabel
+var _detail_category: Label
 var _detail_weight: Label
 var _detail_value: Label
 var _detail_description: Label
@@ -58,6 +66,9 @@ func _ready() -> void:
 	_detail_icon = get_node("OuterMargin/MainContainer/RightPanel/RightDetail/TopHalf") as TextureRect
 	_detail_name = get_node("OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/NameLabel") as Label
 	_detail_rarity = get_node("OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/RarityLabel") as RichTextLabel
+	_detail_category = get_node(
+		"OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/CategoryLabel"
+	) as Label
 	_detail_weight = get_node(
 		"OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/StatsHBox/WeightLabel"
 	) as Label
@@ -115,19 +126,44 @@ func _style_list_headers() -> void:
 	var qty_cell := get_node_or_null(
 		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrQtyCell"
 	) as HBoxContainer
+	var cat_cell := get_node_or_null(
+		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrCatCell"
+	) as HBoxContainer
 	var wt_cell := get_node_or_null(
 		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrWtCell"
 	) as HBoxContainer
+	var val_cell := get_node_or_null(
+		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrValCell"
+	) as HBoxContainer
 	if name_cell:
 		name_cell.add_theme_constant_override("separation", SORT_NAME_BTN_SEP)
+		name_cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		name_cell.size_flags_stretch_ratio = NAME_COL_STRETCH
+	if cat_cell:
+		cat_cell.add_theme_constant_override("separation", SORT_HDR_INNER_SEP)
+		cat_cell.custom_minimum_size = Vector2(0, 0)
+		cat_cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		cat_cell.size_flags_stretch_ratio = META_COL_STRETCH
 	if qty_cell:
 		qty_cell.add_theme_constant_override("separation", SORT_HDR_INNER_SEP)
-		qty_cell.custom_minimum_size = Vector2(COL_QTY_CELL_WIDTH, 0)
+		qty_cell.custom_minimum_size = Vector2(0, 0)
+		qty_cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		qty_cell.size_flags_stretch_ratio = META_COL_STRETCH
 	if wt_cell:
 		wt_cell.add_theme_constant_override("separation", SORT_HDR_INNER_SEP)
-		wt_cell.custom_minimum_size = Vector2(COL_WT_CELL_WIDTH, 0)
+		wt_cell.custom_minimum_size = Vector2(0, 0)
+		wt_cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		wt_cell.size_flags_stretch_ratio = META_COL_STRETCH
+	if val_cell:
+		val_cell.add_theme_constant_override("separation", SORT_HDR_INNER_SEP)
+		val_cell.custom_minimum_size = Vector2(0, 0)
+		val_cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		val_cell.size_flags_stretch_ratio = META_COL_STRETCH
 	var hdr_name := get_node_or_null(
 		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrNameCell/HdrName"
+	) as Label
+	var hdr_cat := get_node_or_null(
+		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrCatCell/HdrCat"
 	) as Label
 	var hdr_qty := get_node_or_null(
 		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrQtyCell/HdrQty"
@@ -135,7 +171,10 @@ func _style_list_headers() -> void:
 	var hdr_wt := get_node_or_null(
 		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrWtCell/HdrWt"
 	) as Label
-	for lab in [hdr_name, hdr_qty, hdr_wt]:
+	var hdr_val := get_node_or_null(
+		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrValCell/HdrVal"
+	) as Label
+	for lab in [hdr_name, hdr_cat, hdr_qty, hdr_wt, hdr_val]:
 		if lab:
 			lab.add_theme_font_size_override("font_size", HEADER_FONT_SZ)
 			lab.add_theme_color_override("font_color", HEADER_GREY)
@@ -143,18 +182,30 @@ func _style_list_headers() -> void:
 		hdr_name.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 		hdr_name.mouse_filter = Control.MOUSE_FILTER_STOP
 		hdr_name.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	if hdr_cat:
+		hdr_cat.custom_minimum_size = Vector2(META_LABEL_MIN_WIDTH, 0)
+		hdr_cat.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		hdr_cat.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		hdr_cat.mouse_filter = Control.MOUSE_FILTER_STOP
+		hdr_cat.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	if hdr_qty:
-		hdr_qty.custom_minimum_size = Vector2(COL_QTY_WIDTH, 0)
+		hdr_qty.custom_minimum_size = Vector2(META_LABEL_MIN_WIDTH, 0)
 		hdr_qty.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		hdr_qty.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		hdr_qty.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		hdr_qty.mouse_filter = Control.MOUSE_FILTER_STOP
 		hdr_qty.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	if hdr_wt:
-		hdr_wt.custom_minimum_size = Vector2(COL_WT_WIDTH, 0)
+		hdr_wt.custom_minimum_size = Vector2(META_LABEL_MIN_WIDTH, 0)
 		hdr_wt.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		hdr_wt.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		hdr_wt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		hdr_wt.mouse_filter = Control.MOUSE_FILTER_STOP
 		hdr_wt.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	if hdr_val:
+		hdr_val.custom_minimum_size = Vector2(META_LABEL_MIN_WIDTH, 0)
+		hdr_val.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		hdr_val.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		hdr_val.mouse_filter = Control.MOUSE_FILTER_STOP
+		hdr_val.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 
 
 func _transparent_stylebox() -> StyleBoxFlat:
@@ -180,8 +231,10 @@ func _apply_selectable_golden_hover() -> void:
 		"OuterMargin/MainContainer/LeftRailPanel/LeftRail/BtnStats",
 		"OuterMargin/MainContainer/LeftRailPanel/LeftRail/BtnMap",
 		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrNameCell/SortNameBtn",
+		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrCatCell/SortCatBtn",
 		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrQtyCell/SortQtyBtn",
 		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrWtCell/SortWtBtn",
+		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrValCell/SortValBtn",
 	]
 	for p in paths:
 		var b := get_node_or_null(p) as Button
@@ -196,13 +249,16 @@ func _apply_selectable_golden_hover() -> void:
 func _style_sort_buttons() -> void:
 	var paths := [
 		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrNameCell/SortNameBtn",
+		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrCatCell/SortCatBtn",
 		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrQtyCell/SortQtyBtn",
 		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrWtCell/SortWtBtn",
+		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrValCell/SortValBtn",
 	]
 	for p in paths:
 		var b := get_node_or_null(p) as Button
 		if b:
 			b.custom_minimum_size.x = SORT_BTN_WIDTH
+			b.custom_minimum_size.y = 14
 			b.add_theme_font_size_override("font_size", SORT_BTN_FONT_SZ)
 			b.add_theme_color_override("font_color", HEADER_GREY)
 
@@ -238,8 +294,14 @@ func _connect_sort_buttons() -> void:
 	var bq := get_node_or_null(
 		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrQtyCell/SortQtyBtn"
 	) as Button
+	var bc := get_node_or_null(
+		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrCatCell/SortCatBtn"
+	) as Button
 	var bw := get_node_or_null(
 		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrWtCell/SortWtBtn"
+	) as Button
+	var bv := get_node_or_null(
+		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrValCell/SortValBtn"
 	) as Button
 	var hdr_name_lab := get_node_or_null(
 		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrNameCell/HdrName"
@@ -247,21 +309,35 @@ func _connect_sort_buttons() -> void:
 	var hdr_qty_lab := get_node_or_null(
 		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrQtyCell/HdrQty"
 	) as Label
+	var hdr_cat_lab := get_node_or_null(
+		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrCatCell/HdrCat"
+	) as Label
 	var hdr_wt_lab := get_node_or_null(
 		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrWtCell/HdrWt"
 	) as Label
+	var hdr_val_lab := get_node_or_null(
+		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrValCell/HdrVal"
+	) as Label
 	if bn:
 		bn.pressed.connect(_on_sort_toggle.bind(SortColumn.NAME))
+	if bc:
+		bc.pressed.connect(_on_sort_toggle.bind(SortColumn.CAT))
 	if bq:
 		bq.pressed.connect(_on_sort_toggle.bind(SortColumn.QTY))
 	if bw:
 		bw.pressed.connect(_on_sort_toggle.bind(SortColumn.WT))
+	if bv:
+		bv.pressed.connect(_on_sort_toggle.bind(SortColumn.VAL))
 	if hdr_name_lab:
 		hdr_name_lab.gui_input.connect(_on_header_sort_gui_input.bind(SortColumn.NAME))
+	if hdr_cat_lab:
+		hdr_cat_lab.gui_input.connect(_on_header_sort_gui_input.bind(SortColumn.CAT))
 	if hdr_qty_lab:
 		hdr_qty_lab.gui_input.connect(_on_header_sort_gui_input.bind(SortColumn.QTY))
 	if hdr_wt_lab:
 		hdr_wt_lab.gui_input.connect(_on_header_sort_gui_input.bind(SortColumn.WT))
+	if hdr_val_lab:
+		hdr_val_lab.gui_input.connect(_on_header_sort_gui_input.bind(SortColumn.VAL))
 
 
 func _connect_action_buttons() -> void:
@@ -287,10 +363,16 @@ func _update_sort_button_icons() -> void:
 	var bq := get_node_or_null(
 		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrQtyCell/SortQtyBtn"
 	) as Button
+	var bc := get_node_or_null(
+		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrCatCell/SortCatBtn"
+	) as Button
 	var bw := get_node_or_null(
 		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrWtCell/SortWtBtn"
 	) as Button
-	for pair in [[bn, SortColumn.NAME], [bq, SortColumn.QTY], [bw, SortColumn.WT]]:
+	var bv := get_node_or_null(
+		"OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrValCell/SortValBtn"
+	) as Button
+	for pair in [[bn, SortColumn.NAME], [bc, SortColumn.CAT], [bq, SortColumn.QTY], [bw, SortColumn.WT], [bv, SortColumn.VAL]]:
 		var b: Button = pair[0]
 		var col: SortColumn = pair[1]
 		if b == null:
@@ -382,6 +464,13 @@ func _apply_sort_to_entries() -> void:
 						return c < 0 if asc else c > 0
 					return false
 			)
+		SortColumn.CAT:
+			_entries.sort_custom(
+				func(a: ItemResource, b: ItemResource) -> bool:
+					if a.category != b.category:
+						return a.category < b.category if asc else a.category > b.category
+					return a.item_name.nocasecmp_to(b.item_name) < 0
+			)
 		SortColumn.QTY:
 			_entries.sort_custom(
 				func(a: ItemResource, b: ItemResource) -> bool:
@@ -394,6 +483,13 @@ func _apply_sort_to_entries() -> void:
 				func(a: ItemResource, b: ItemResource) -> bool:
 					if not is_equal_approx(a.weight_lbs, b.weight_lbs):
 						return a.weight_lbs < b.weight_lbs if asc else a.weight_lbs > b.weight_lbs
+					return a.item_name.nocasecmp_to(b.item_name) < 0
+			)
+		SortColumn.VAL:
+			_entries.sort_custom(
+				func(a: ItemResource, b: ItemResource) -> bool:
+					if not is_equal_approx(a.value_usd, b.value_usd):
+						return a.value_usd < b.value_usd if asc else a.value_usd > b.value_usd
 					return a.item_name.nocasecmp_to(b.item_name) < 0
 			)
 
@@ -543,7 +639,7 @@ func _make_inventory_row(entry: ItemResource, row_idx: int) -> Control:
 	var rc := _rarity_color(entry.rarity)
 	var shell := Control.new()
 	shell.mouse_filter = Control.MOUSE_FILTER_STOP
-	shell.custom_minimum_size.y = 26
+	shell.custom_minimum_size.y = 34
 
 	var highlight := ColorRect.new()
 	highlight.name = "HighlightBar"
@@ -572,14 +668,35 @@ func _make_inventory_row(entry: ItemResource, row_idx: int) -> Control:
 
 	var name_lbl := Label.new()
 	name_lbl.text = entry.item_name
-	name_lbl.clip_text = true
+	name_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	name_lbl.clip_text = false
 	name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_lbl.add_theme_font_size_override("font_size", _name_row_font_size(entry.item_name))
 	name_lbl.add_theme_color_override("font_color", rc)
 
+	var cat_lbl := Label.new()
+	cat_lbl.text = _category_symbol(entry.category)
+	cat_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cat_lbl.custom_minimum_size = Vector2(META_LABEL_MIN_WIDTH, 0)
+	cat_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cat_lbl.add_theme_color_override("font_color", Color.WHITE)
+	var cat_pad := Control.new()
+	cat_pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	cat_pad.custom_minimum_size = Vector2(SORT_BTN_WIDTH, 0)
+
+	var cat_cell := HBoxContainer.new()
+	cat_cell.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	cat_cell.add_theme_constant_override("separation", SORT_HDR_INNER_SEP)
+	cat_cell.custom_minimum_size = Vector2(0, 0)
+	cat_cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cat_cell.size_flags_stretch_ratio = META_COL_STRETCH
+	cat_cell.add_child(cat_lbl)
+	cat_cell.add_child(cat_pad)
+
 	var qty_lbl := Label.new()
-	qty_lbl.text = str(entry.quantity)
+	qty_lbl.text = str(entry.quantity).lpad(3, " ")
 	qty_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	qty_lbl.custom_minimum_size = Vector2(COL_QTY_WIDTH, 0)
+	qty_lbl.custom_minimum_size = Vector2(META_LABEL_MIN_WIDTH, 0)
 	qty_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	qty_lbl.add_theme_color_override("font_color", Color.WHITE)
 	var qty_pad := Control.new()
@@ -589,15 +706,16 @@ func _make_inventory_row(entry: ItemResource, row_idx: int) -> Control:
 	var qty_cell := HBoxContainer.new()
 	qty_cell.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	qty_cell.add_theme_constant_override("separation", SORT_HDR_INNER_SEP)
-	qty_cell.custom_minimum_size = Vector2(COL_QTY_CELL_WIDTH, 0)
-	qty_cell.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	qty_cell.custom_minimum_size = Vector2(0, 0)
+	qty_cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	qty_cell.size_flags_stretch_ratio = META_COL_STRETCH
 	qty_cell.add_child(qty_lbl)
 	qty_cell.add_child(qty_pad)
 
 	var wt_lbl := Label.new()
-	wt_lbl.text = _format_weight_smart(entry.weight_lbs)
+	wt_lbl.text = _format_weight_smart(entry.weight_lbs).lpad(6, " ")
 	wt_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	wt_lbl.custom_minimum_size = Vector2(COL_WT_WIDTH, 0)
+	wt_lbl.custom_minimum_size = Vector2(META_LABEL_MIN_WIDTH, 0)
 	wt_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	wt_lbl.add_theme_color_override("font_color", Color.WHITE)
 	var wt_pad := Control.new()
@@ -607,15 +725,38 @@ func _make_inventory_row(entry: ItemResource, row_idx: int) -> Control:
 	var wt_cell := HBoxContainer.new()
 	wt_cell.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	wt_cell.add_theme_constant_override("separation", SORT_HDR_INNER_SEP)
-	wt_cell.custom_minimum_size = Vector2(COL_WT_CELL_WIDTH, 0)
-	wt_cell.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	wt_cell.custom_minimum_size = Vector2(0, 0)
+	wt_cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	wt_cell.size_flags_stretch_ratio = META_COL_STRETCH
 	wt_cell.add_child(wt_lbl)
 	wt_cell.add_child(wt_pad)
 
+	var val_lbl := Label.new()
+	val_lbl.text = ("%.2f" % entry.value_usd).lpad(7, " ")
+	val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	val_lbl.custom_minimum_size = Vector2(META_LABEL_MIN_WIDTH, 0)
+	val_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	val_lbl.add_theme_color_override("font_color", Color.WHITE)
+	var val_pad := Control.new()
+	val_pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	val_pad.custom_minimum_size = Vector2(SORT_BTN_WIDTH, 0)
+
+	var val_cell := HBoxContainer.new()
+	val_cell.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	val_cell.add_theme_constant_override("separation", SORT_HDR_INNER_SEP)
+	val_cell.custom_minimum_size = Vector2(0, 0)
+	val_cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	val_cell.size_flags_stretch_ratio = META_COL_STRETCH
+	val_cell.add_child(val_lbl)
+	val_cell.add_child(val_pad)
+
 	h.add_child(row_lead)
+	name_lbl.size_flags_stretch_ratio = NAME_COL_STRETCH
 	h.add_child(name_lbl)
+	h.add_child(cat_cell)
 	h.add_child(qty_cell)
 	h.add_child(wt_cell)
+	h.add_child(val_cell)
 
 	shell.add_child(highlight)
 	shell.add_child(h)
@@ -687,6 +828,8 @@ func _select_index(idx: int) -> void:
 	_detail_rarity.text = (
 		"[color=%s][b]%s[/b][/color]" % [rc.to_html(false), _rarity_display_string(entry.rarity)]
 	)
+	_detail_category.text = "Category: %s" % _category_display_string(entry.category)
+	_detail_category.add_theme_color_override("font_color", Color.WHITE)
 
 	_detail_weight.text = "WT: %s lb" % _format_weight_smart(entry.weight_lbs)
 	_detail_weight.add_theme_color_override("font_color", Color.WHITE)
@@ -712,6 +855,8 @@ func _clear_detail_panel() -> void:
 	_detail_name.add_theme_color_override("font_color", Color.WHITE)
 	_detail_rarity.text = ""
 	_detail_rarity.add_theme_color_override("default_color", Color.WHITE)
+	_detail_category.text = ""
+	_detail_category.add_theme_color_override("font_color", Color.WHITE)
 	_detail_weight.text = ""
 	_detail_weight.add_theme_color_override("font_color", Color.WHITE)
 	_detail_value.text = ""
@@ -739,6 +884,41 @@ func _rarity_display_string(r: ItemResource.Rarity) -> String:
 		ItemResource.Rarity.GOLD:
 			return "GOLD"
 	return "UNKNOWN"
+
+
+func _category_display_string(c: ItemResource.Category) -> String:
+	match c:
+		ItemResource.Category.FOOD:
+			return "Food"
+		ItemResource.Category.UTILITY:
+			return "Utility"
+		ItemResource.Category.WEAPON:
+			return "Weapon"
+		ItemResource.Category.CLOTHING:
+			return "Clothing"
+	return "Unknown"
+
+
+func _category_symbol(c: ItemResource.Category) -> String:
+	match c:
+		ItemResource.Category.FOOD:
+			return "■"
+		ItemResource.Category.UTILITY:
+			return "▲"
+		ItemResource.Category.WEAPON:
+			return "●"
+		ItemResource.Category.CLOTHING:
+			return "■"
+	return "?"
+
+
+func _name_row_font_size(item_name: String) -> int:
+	var n := item_name.length()
+	if n > 20:
+		return 9
+	if n > 14:
+		return 10
+	return 11
 
 
 func _rarity_color(r: ItemResource.Rarity) -> Color:
