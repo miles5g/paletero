@@ -269,10 +269,10 @@ func _ready() -> void:
 	env.fog_aerial_perspective = 0.6
 	# Faint bloom so bright UI / spec hits read PS2-era against the dark grade.
 	env.glow_enabled = true
-	env.glow_intensity = 0.28
-	env.glow_strength = 0.85
-	env.glow_bloom = 0.12
-	env.glow_hdr_threshold = 0.78
+	env.glow_intensity = 0.38
+	env.glow_strength = 0.92
+	env.glow_bloom = 0.2
+	env.glow_hdr_threshold = 0.72
 	env.glow_hdr_scale = 0.88
 	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
 	world_env.environment = env

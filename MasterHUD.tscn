@@ -96,22 +96,78 @@ theme_override_constants/separation = 4
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="HdrName" type="Label" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow"]
+[node name="HdrRowLead" type="Control" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow"]
+custom_minimum_size = Vector2(6, 0)
+layout_mode = 2
+
+[node name="HdrNameCell" type="HBoxContainer" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 0
+
+[node name="HdrName" type="Label" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrNameCell"]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "NAME"
 
-[node name="HdrQty" type="Label" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow"]
+[node name="SortNameBtn" type="Button" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrNameCell"]
+custom_minimum_size = Vector2(22, 18)
+layout_mode = 2
+flat = true
+text = "▲"
+
+[node name="HdrNameCellTail" type="Control" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrNameCell"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="HdrQtyCell" type="HBoxContainer" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow"]
+custom_minimum_size = Vector2(68, 0)
+layout_mode = 2
+size_flags_horizontal = 8
+theme_override_constants/separation = 2
+
+[node name="HdrQty" type="Label" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrQtyCell"]
 custom_minimum_size = Vector2(44, 0)
 layout_mode = 2
+size_flags_horizontal = 3
 horizontal_alignment = 2
 text = "QTY"
 
-[node name="HdrWt" type="Label" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow"]
+[node name="SortQtyBtn" type="Button" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrQtyCell"]
+custom_minimum_size = Vector2(22, 18)
+layout_mode = 2
+flat = true
+text = "▲"
+
+[node name="HdrQtyCellTail" type="Control" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrQtyCell"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="HdrWtCell" type="HBoxContainer" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow"]
+custom_minimum_size = Vector2(96, 0)
+layout_mode = 2
+size_flags_horizontal = 8
+theme_override_constants/separation = 2
+
+[node name="HdrWt" type="Label" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrWtCell"]
 custom_minimum_size = Vector2(72, 0)
 layout_mode = 2
+size_flags_horizontal = 3
 horizontal_alignment = 2
 text = "WT"
+
+[node name="SortWtBtn" type="Button" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrWtCell"]
+custom_minimum_size = Vector2(22, 18)
+layout_mode = 2
+flat = true
+text = "▲"
+
+[node name="HdrWtCellTail" type="Control" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn/HeaderRow/HdrWtCell"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
 
 [node name="CenterList" type="ScrollContainer" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn"]
 layout_mode = 2
@@ -124,6 +180,34 @@ vertical_scroll_mode = 1
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 2
+
+[node name="WeightFooter" type="Panel" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn"]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="FooterTotalsHBox" type="HBoxContainer" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn/WeightFooter"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 6.0
+offset_top = 4.0
+offset_right = -6.0
+offset_bottom = -4.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="TotalMoneyLabel" type="Label" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn/WeightFooter/FooterTotalsHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Total money: $0.00"
+
+[node name="TotalManifestWeightLabel" type="Label" parent="OuterMargin/MainContainer/CenterPanel/CenterColumn/WeightFooter/FooterTotalsHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+horizontal_alignment = 2
+text = "Total weight: 0 lbs"
 
 [node name="RightPanel" type="Panel" parent="OuterMargin/MainContainer"]
 layout_mode = 2
