@@ -62,6 +62,7 @@ var _active_section: Section = Section.MANIFEST
 
 var _cart: RigidBody3D = null
 var _entries: Array[ItemResource] = []
+var _placeholder_preview_tex: Texture2D = null
 
 var _row_hover_tweens: Dictionary = {}
 var _row_pulse_targets: Dictionary = {}
@@ -114,7 +115,7 @@ func _ready() -> void:
 	_manifest_page = get_node("OuterMargin/MainContainer/CenterPanel/CenterColumn") as Control
 	_ensure_section_pages()
 	if _detail_icon and _detail_icon.texture == null:
-		_detail_icon.texture = _make_temp_item_preview_texture()
+		_detail_icon.texture = _get_placeholder_preview_texture()
 		_detail_icon.visible = true
 	_set_action_list_visible(false)
 	call_deferred("_deferred_after_world_theme")
@@ -680,7 +681,7 @@ func _remove_selected_item_from_cart() -> ItemResource:
 	return entry
 
 
-func _spawn_dropped_placeholder(item_name: String, item: ItemResource) -> void:
+func _spawn_dropped_item(item_name: String, item: ItemResource) -> void:
 	var scene := get_tree().current_scene
 	if scene == null:
 		return
@@ -716,7 +717,7 @@ func _on_drop_pressed() -> void:
 	var removed := _remove_selected_item_from_cart()
 	if removed == null:
 		return
-	_spawn_dropped_placeholder(removed.item_name, removed)
+	_spawn_dropped_item(removed.item_name, removed)
 	refresh()
 
 
@@ -1064,7 +1065,7 @@ func _select_index(idx: int) -> void:
 		_detail_icon.texture = entry.icon
 		_detail_icon.visible = true
 	else:
-		_detail_icon.texture = _make_temp_item_preview_texture()
+		_detail_icon.texture = _get_placeholder_preview_texture()
 		_detail_icon.visible = true
 	_set_action_list_visible(true)
 	_refresh_selected_row_highlight()
@@ -1085,7 +1086,7 @@ func _clear_detail_panel() -> void:
 	_detail_value.add_theme_color_override("font_color", Color.WHITE)
 	_detail_description.text = ""
 	_detail_description.add_theme_color_override("font_color", Color.WHITE)
-	_detail_icon.texture = _make_temp_item_preview_texture()
+	_detail_icon.texture = _get_placeholder_preview_texture()
 	_detail_icon.visible = true
 	_set_action_list_visible(false)
 
@@ -1109,6 +1110,12 @@ func _make_temp_item_preview_texture() -> Texture2D:
 				img.set_pixel(x, y, Color(0.7, 0.7, 0.7, 1.0))
 	var tex := ImageTexture.create_from_image(img)
 	return tex
+
+
+func _get_placeholder_preview_texture() -> Texture2D:
+	if _placeholder_preview_tex == null:
+		_placeholder_preview_tex = _make_temp_item_preview_texture()
+	return _placeholder_preview_tex
 
 
 func _rarity_display_string(r: ItemResource.Rarity) -> String:

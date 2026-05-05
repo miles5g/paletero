@@ -212,8 +212,20 @@ func _drop_held_item() -> void:
 	if fwd.length_squared() < 1e-6:
 		fwd = Vector3.FORWARD
 	fwd = fwd.normalized()
-	_held_item.global_position = global_position + fwd * 1.0 + Vector3.UP * 0.8
-	_held_item.apply_central_impulse(fwd * 1.1 + Vector3.UP * 0.2)
+	var right := global_transform.basis.x
+	right.y = 0.0
+	if right.length_squared() < 1e-6:
+		right = Vector3.RIGHT
+	right = right.normalized()
+	# Drop above head with random lateral bias so it reliably rolls off.
+	var side_sign := -1.0 if randf() < 0.5 else 1.0
+	var side_push := right * side_sign * randf_range(0.65, 1.05)
+	var fwd_push := fwd * randf_range(0.2, 0.55)
+	var lateral := (side_push + fwd_push).normalized()
+	var spawn_offset := lateral * randf_range(0.12, 0.28)
+	_held_item.global_position = global_position + Vector3.UP * 2.05 + spawn_offset
+	_held_item.apply_central_impulse(lateral * randf_range(0.75, 1.25) + Vector3.UP * 0.02)
+	_held_item.apply_torque_impulse(Vector3(randf_range(0.35, 0.95), 0.0, randf_range(-0.95, -0.35) * side_sign))
 	_held_item = null
 
 
