@@ -6,6 +6,8 @@ const REAL_SECONDS_PER_CYCLE: float = 1800.0
 const ROTATION_DEGREES_PER_SECOND: float = FULL_ROTATION_DEGREES / REAL_SECONDS_PER_CYCLE
 const WAIT_ROTATION_DEGREES_PER_SECOND: float = 15.0 # 1 game hour per second.
 const ORBIT_RADIUS: float = 220.0
+## Sun/moon glow is hidden when body center is below this world Y (street tops ~0).
+const CELESTIAL_GLOW_MIN_WORLD_Y: float = 0.35
 
 @export var debug_hud_enabled: bool = true
 
@@ -16,6 +18,9 @@ var _orbital_arm: Node3D = null
 var _sun_orb: MeshInstance3D = null
 var _sun_halo: MeshInstance3D = null
 var _sun_light: DirectionalLight3D = null
+var _moon_orb: MeshInstance3D = null
+var _moon_halo: MeshInstance3D = null
+var _moon_light: DirectionalLight3D = null
 var _cycle_angle_deg: float = 90.0
 var _debug_layer: CanvasLayer = null
 var _backdrop: ColorRect = null
@@ -178,7 +183,6 @@ func _build_orbital_rig() -> void:
 	halo_mat.emission_energy_multiplier = 4.6
 	halo_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	halo_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	halo_mat.no_depth_test = true
 	halo_mat.disable_fog = true
 	halo_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	_sun_halo.material_override = halo_mat
@@ -192,6 +196,51 @@ func _build_orbital_rig() -> void:
 	_sun_light.light_color = Color(1.0, 0.92, 0.74)
 	_sun_orb.add_child(_sun_light)
 
+	# Moon: same orbit ring, opposite side of the sun (+Z vs sun's -Z).
+	_moon_orb = MeshInstance3D.new()
+	_moon_orb.name = "MoonOrb"
+	var moon_mesh := SphereMesh.new()
+	moon_mesh.radius = 7.2
+	moon_mesh.height = 14.4
+	_moon_orb.mesh = moon_mesh
+	_moon_orb.position = Vector3(0.0, 0.0, ORBIT_RADIUS)
+	var moon_mat := StandardMaterial3D.new()
+	moon_mat.albedo_color = Color(0.72, 0.74, 0.78)
+	moon_mat.emission_enabled = true
+	moon_mat.emission = Color(0.82, 0.86, 0.95)
+	moon_mat.emission_energy_multiplier = 2.4
+	moon_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	moon_mat.disable_ambient_light = true
+	moon_mat.disable_fog = true
+	_moon_orb.material_override = moon_mat
+	_orbital_arm.add_child(_moon_orb)
+
+	_moon_halo = MeshInstance3D.new()
+	_moon_halo.name = "MoonHalo"
+	var moon_halo_mesh := SphereMesh.new()
+	moon_halo_mesh.radius = 10.5
+	moon_halo_mesh.height = 21.0
+	_moon_halo.mesh = moon_halo_mesh
+	var moon_halo_mat := StandardMaterial3D.new()
+	moon_halo_mat.albedo_color = Color(0.65, 0.72, 0.92, 0.0)
+	moon_halo_mat.emission_enabled = true
+	moon_halo_mat.emission = Color(0.7, 0.78, 0.98)
+	moon_halo_mat.emission_energy_multiplier = 2.0
+	moon_halo_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	moon_halo_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	moon_halo_mat.disable_fog = true
+	moon_halo_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_moon_halo.material_override = moon_halo_mat
+	_moon_orb.add_child(_moon_halo)
+
+	_moon_light = DirectionalLight3D.new()
+	_moon_light.name = "MoonLight"
+	_moon_light.shadow_enabled = false
+	_moon_light.light_energy = 0.38
+	_moon_light.light_color = Color(0.68, 0.76, 0.98)
+	_moon_light.light_specular = 0.48
+	_moon_orb.add_child(_moon_light)
+
 
 func _apply_cycle_visuals() -> void:
 	if _pivot == null:
@@ -204,6 +253,20 @@ func _apply_cycle_visuals() -> void:
 	_sun_orb.look_at(Vector3.ZERO, safe_up)
 	_sun_light.look_at(Vector3.ZERO, safe_up)
 
+	var moon_to_origin := Vector3.ZERO - _moon_orb.global_position
+	var moon_forward := moon_to_origin.normalized() if moon_to_origin.length_squared() > 1e-6 else Vector3.BACK
+	var moon_dot_up := absf(moon_forward.dot(Vector3.UP))
+	var moon_safe_up := Vector3.UP if moon_dot_up < 0.995 else Vector3.FORWARD
+	_moon_orb.look_at(Vector3.ZERO, moon_safe_up)
+	_moon_light.look_at(Vector3.ZERO, moon_safe_up)
+
+	var sun_glow_ok: bool = _sun_orb.global_position.y > CELESTIAL_GLOW_MIN_WORLD_Y
+	var moon_glow_ok: bool = _moon_orb.global_position.y > CELESTIAL_GLOW_MIN_WORLD_Y
+	if _sun_halo:
+		_sun_halo.visible = sun_glow_ok
+	if _moon_halo:
+		_moon_halo.visible = moon_glow_ok
+
 	var altitude: float = sin(deg_to_rad(_cycle_angle_deg))
 	var daylight: float = clampf(altitude, 0.0, 1.0)
 	var night_depth: float = clampf(-altitude, 0.0, 1.0)
@@ -214,19 +277,33 @@ func _apply_cycle_visuals() -> void:
 	var sun_energy: float = maxf(day_energy * 2.35 + twilight_glow, 0.0) * (1.0 - midnight_cut)
 	_sun_light.light_energy = sun_energy
 	_sun_light.light_color = _sun_color_for_altitude(altitude)
+
+	# Moonlight: strongest when the sun is down; cool blue-white, no daytime spill.
+	var moon_up := smoothstep(0.08, 0.48, night_depth)
+	var moon_energy: float = moon_up * pow(night_depth, 0.58) * 0.92
+	moon_energy *= 1.0 - smoothstep(0.0, 0.35, daylight)
+	_moon_light.light_energy = moon_energy
+	_moon_light.light_color = _moon_light_color_for_night(night_depth, horizon_band)
+
 	_update_clock_hud()
 
 	var orb_material := _sun_orb.material_override as StandardMaterial3D
 	if orb_material:
 		var orb_glow := 1.8 + day_energy * 6.0 + horizon_band * 1.3
+		if not sun_glow_ok:
+			orb_glow = 0.0
 		orb_material.emission_energy_multiplier = orb_glow
 		var hot_orange := Color(1.0, 0.62, 0.18)
 		var warm_yellow := Color(1.0, 0.9, 0.34)
 		var core_t := clampf(day_energy * 0.85 + horizon_band * 0.35, 0.0, 1.0)
-		orb_material.albedo_color = hot_orange.lerp(warm_yellow, core_t)
-		orb_material.emission = hot_orange.lerp(warm_yellow, clampf(core_t + 0.12, 0.0, 1.0))
+		if sun_glow_ok:
+			orb_material.albedo_color = hot_orange.lerp(warm_yellow, core_t)
+			orb_material.emission = hot_orange.lerp(warm_yellow, clampf(core_t + 0.12, 0.0, 1.0))
+		else:
+			orb_material.albedo_color = Color(0.12, 0.12, 0.13)
+			orb_material.emission = Color.BLACK
 	var halo_material := _sun_halo.material_override as StandardMaterial3D if _sun_halo != null else null
-	if halo_material:
+	if halo_material and sun_glow_ok:
 		var hot_orange := Color(1.0, 0.62, 0.18)
 		var warm_yellow := Color(1.0, 0.92, 0.36)
 		var halo_t := clampf(day_energy * 0.9 + horizon_band * 0.4, 0.0, 1.0)
@@ -235,6 +312,30 @@ func _apply_cycle_visuals() -> void:
 		halo_material.albedo_color = Color(halo_col.r, halo_col.g, halo_col.b, halo_alpha)
 		halo_material.emission = hot_orange.lerp(warm_yellow, clampf(halo_t + 0.14, 0.0, 1.0))
 		halo_material.emission_energy_multiplier = 2.2 + day_energy * 4.0 + horizon_band * 1.2
+
+	var moon_body := _moon_orb.material_override as StandardMaterial3D if _moon_orb != null else null
+	var moon_halo_mat := _moon_halo.material_override as StandardMaterial3D if _moon_halo != null else null
+	if moon_body:
+		var silver := Color(0.62, 0.64, 0.68)
+		var ice := Color(0.88, 0.91, 0.98)
+		var moon_vis := clampf(night_depth * 1.15 + horizon_band * 0.08, 0.0, 1.0)
+		if moon_glow_ok:
+			moon_body.albedo_color = silver.lerp(ice, moon_vis * 0.45)
+			moon_body.emission = Color(0.72, 0.78, 0.95).lerp(Color(0.9, 0.93, 1.0), moon_vis)
+			moon_body.emission_energy_multiplier = 0.45 + moon_vis * 4.6
+		else:
+			moon_body.albedo_color = Color(0.12, 0.12, 0.14)
+			moon_body.emission = Color.BLACK
+			moon_body.emission_energy_multiplier = 0.0
+	if moon_halo_mat and moon_glow_ok:
+		var moon_vis_h := clampf(night_depth * 1.05 + horizon_band * 0.1, 0.0, 1.0)
+		var halo_blue := Color(0.58, 0.68, 0.95)
+		var halo_pale := Color(0.82, 0.88, 1.0)
+		var hcol := halo_blue.lerp(halo_pale, moon_vis_h)
+		var halpha := clampf(0.04 + moon_vis_h * 0.22, 0.02, 0.28)
+		moon_halo_mat.albedo_color = Color(hcol.r, hcol.g, hcol.b, halpha)
+		moon_halo_mat.emission = hcol
+		moon_halo_mat.emission_energy_multiplier = 0.75 + moon_vis_h * 3.2
 
 	if _environment == null:
 		return
@@ -259,6 +360,13 @@ func _apply_cycle_visuals() -> void:
 	_environment.glow_intensity = lerpf(0.82, 0.34, env_night)
 	_environment.glow_strength = lerpf(1.2, 0.86, env_night)
 	_environment.glow_hdr_threshold = lerpf(0.58, 0.76, env_night)
+
+
+func _moon_light_color_for_night(night_depth: float, horizon_band: float) -> Color:
+	var cool := Color(0.55, 0.62, 0.88)
+	var silver_blue := Color(0.74, 0.8, 0.98)
+	var t := clampf(night_depth * 0.9 + horizon_band * 0.15, 0.0, 1.0)
+	return cool.lerp(silver_blue, t)
 
 
 func _sun_color_for_altitude(altitude: float) -> Color:
