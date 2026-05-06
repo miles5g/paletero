@@ -65,6 +65,7 @@ var _right_punch_z: float = 0.0
 var _left_punch_tw: Tween = null
 var _right_punch_tw: Tween = null
 var _cam_jitter_tw: Tween = null
+var _swap_hands_tw: Tween = null
 var _player_transparency_target: float = 0.0
 
 func _ready() -> void:
@@ -291,8 +292,30 @@ func _swap_hand_items() -> void:
 	var tmp_mask := _right_hand_prev_mask
 	_right_hand_prev_mask = _left_hand_prev_mask
 	_left_hand_prev_mask = tmp_mask
+	_play_swap_hands_animation()
 	_update_held_items_transform()
 	_refresh_hand_slot_hud()
+
+func _play_swap_hands_animation() -> void:
+	if _swap_hands_tw != null and _swap_hands_tw.is_valid():
+		_swap_hands_tw.kill()
+	if _left_punch_tw != null and _left_punch_tw.is_valid():
+		_left_punch_tw.kill()
+	if _right_punch_tw != null and _right_punch_tw.is_valid():
+		_right_punch_tw.kill()
+	_left_punch_z = 0.0
+	_right_punch_z = 0.0
+	_swap_hands_tw = create_tween()
+	_swap_hands_tw.set_trans(Tween.TRANS_SINE)
+	_swap_hands_tw.set_ease(Tween.EASE_OUT)
+	# Sequential left/right jab makes swap motion clearly readable.
+	_swap_hands_tw.tween_property(self, "_left_punch_z", -0.18, 0.055)
+	_swap_hands_tw.set_ease(Tween.EASE_IN)
+	_swap_hands_tw.tween_property(self, "_left_punch_z", 0.0, 0.07)
+	_swap_hands_tw.set_ease(Tween.EASE_OUT)
+	_swap_hands_tw.tween_property(self, "_right_punch_z", -0.18, 0.055)
+	_swap_hands_tw.set_ease(Tween.EASE_IN)
+	_swap_hands_tw.tween_property(self, "_right_punch_z", 0.0, 0.07)
 
 func _apply_punch_camera_jitter(side: float) -> void:
 	if _camera == null:
@@ -685,6 +708,14 @@ func _update_push_arms_visual() -> void:
 		handle_gp = current_cart.global_position + cb * Vector3(0.0, 0.45, 0.75)
 	var left_target := _clamp_arm_reach_target(left_shoulder, handle_gp)
 	var right_target := _clamp_arm_reach_target(right_shoulder, handle_gp)
+	var fwd := -global_transform.basis.z
+	fwd.y = 0.0
+	if fwd.length_squared() < 1e-6:
+		fwd = Vector3.FORWARD
+	fwd = fwd.normalized()
+	# Allow punch/swap arm offsets to animate while pushing cart too.
+	left_target += fwd * (-_left_punch_z * 1.15)
+	right_target += fwd * (-_right_punch_z * 1.15)
 	_left_hand_world_pos = left_target
 	_right_hand_world_pos = right_target
 	var left_elbow := _arm_elbow_target(left_shoulder, left_target, -1.0)
