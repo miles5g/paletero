@@ -175,8 +175,8 @@ func _update_free_arms_visual(delta: float, moving: bool) -> void:
 		right = Vector3.RIGHT
 	right = right.normalized()
 	var up := b.y.normalized()
-	var left_shoulder := global_position + b * Vector3(-0.42, 0.92 + bob_y, 0.08)
-	var right_shoulder := global_position + b * Vector3(0.42, 0.92 + bob_y, 0.08)
+	var left_shoulder := global_position + b * Vector3(-0.42, 0.58 + bob_y, 0.08)
+	var right_shoulder := global_position + b * Vector3(0.42, 0.58 + bob_y, 0.08)
 	var left_punch_amt := clampf(-_left_punch_z / 0.19, 0.0, 1.0)
 	var right_punch_amt := clampf(-_right_punch_z / 0.19, 0.0, 1.0)
 	var left_hand := left_shoulder + fwd * (0.34 + left_punch_amt * 0.28) + right * -0.18 + up * -0.19
@@ -552,8 +552,8 @@ func _update_push_arms_visual() -> void:
 	if _push_arm_l == null or _push_arm_r == null or _push_forearm_l == null or _push_forearm_r == null:
 		return
 	var b := global_transform.basis
-	var left_shoulder := global_position + b * Vector3(-0.42, 0.92, 0.08)
-	var right_shoulder := global_position + b * Vector3(0.42, 0.92, 0.08)
+	var left_shoulder := global_position + b * Vector3(-0.42, 0.58, 0.08)
+	var right_shoulder := global_position + b * Vector3(0.42, 0.58, 0.08)
 	var handle_gp: Vector3
 	var hz := current_cart.get_node_or_null("HandleZone") as Node3D
 	if hz != null and hz.is_inside_tree():
