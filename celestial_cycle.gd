@@ -6,7 +6,6 @@ const REAL_SECONDS_PER_CYCLE: float = 1800.0
 const ROTATION_DEGREES_PER_SECOND: float = FULL_ROTATION_DEGREES / REAL_SECONDS_PER_CYCLE
 const WAIT_ROTATION_DEGREES_PER_SECOND: float = 15.0 # 1 game hour per second.
 const ORBIT_RADIUS: float = 220.0
-const WAIT_ACTION: StringName = &"wait_time"
 
 @export var debug_hud_enabled: bool = true
 
@@ -30,9 +29,11 @@ var _clock_radius: float = 58.0
 var _is_wait_selecting: bool = false
 var _is_wait_advancing: bool = false
 var _wait_target_angle_deg: float = 90.0
-var _raw_t_prev_down: bool = false
 var _wait_slider_dragging: bool = false
 var _pre_wait_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
+var _enter_prev_down: bool = false
+var _esc_prev_down: bool = false
+var _t_prev_down: bool = false
 
 
 func setup(world_environment: WorldEnvironment) -> void:
@@ -43,14 +44,13 @@ func setup(world_environment: WorldEnvironment) -> void:
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	set_process_input(true)
-	_ensure_wait_action()
 	_build_orbital_rig()
 	_build_debug_hud()
 	_apply_cycle_visuals()
 
 
 func _process(delta: float) -> void:
-	_poll_wait_key()
+	_poll_wait_controls()
 	_poll_wait_slider_keys(delta)
 	if _is_wait_advancing:
 		_advance_wait_cycle(delta)
@@ -62,13 +62,6 @@ func _process(delta: float) -> void:
 func _input(event: InputEvent) -> void:
 	if not debug_hud_enabled:
 		return
-	if event is InputEventKey:
-		var key_event := event as InputEventKey
-		var is_t := key_event.keycode == KEY_T or key_event.physical_keycode == KEY_T
-		if key_event.pressed and not key_event.echo and is_t:
-			_handle_wait_toggle()
-			get_viewport().set_input_as_handled()
-			return
 	if not _is_wait_selecting:
 		return
 	if event is InputEventMouseButton:
@@ -95,35 +88,30 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 
 
-func _poll_wait_key() -> void:
-	var raw_t_down := Input.is_key_pressed(KEY_T)
-	if raw_t_down and not _raw_t_prev_down:
-		_handle_wait_toggle()
-	_raw_t_prev_down = raw_t_down
-
-
-func _ensure_wait_action() -> void:
-	if not InputMap.has_action(WAIT_ACTION):
-		InputMap.add_action(WAIT_ACTION)
-	var has_t_binding := false
-	for ev in InputMap.action_get_events(WAIT_ACTION):
-		var k := ev as InputEventKey
-		if k != null and (k.keycode == KEY_T or k.physical_keycode == KEY_T):
-			has_t_binding = true
-			break
-	if has_t_binding:
+func _poll_wait_controls() -> void:
+	var enter_down := Input.is_key_pressed(KEY_ENTER) or Input.is_key_pressed(KEY_KP_ENTER)
+	var esc_down := Input.is_key_pressed(KEY_ESCAPE)
+	var t_down := Input.is_key_pressed(KEY_T)
+	var enter_edge := enter_down and not _enter_prev_down
+	var esc_edge := esc_down and not _esc_prev_down
+	var t_edge := t_down and not _t_prev_down
+	_enter_prev_down = enter_down
+	_esc_prev_down = esc_down
+	_t_prev_down = t_down
+	if not (_is_wait_selecting or _is_wait_advancing):
 		return
-	var t_key := InputEventKey.new()
-	t_key.keycode = KEY_T
-	t_key.physical_keycode = KEY_T
-	InputMap.action_add_event(WAIT_ACTION, t_key)
+	if esc_edge or t_edge:
+		_finish_wait()
+		return
+	if _is_wait_selecting and enter_edge:
+		_begin_wait_advance()
 
 
 func _handle_wait_toggle() -> void:
-	if _is_wait_selecting:
-		_begin_wait_advance()
-		return
 	if _is_wait_advancing:
+		_finish_wait()
+		return
+	if _is_wait_selecting:
 		_finish_wait()
 		return
 	if not _can_start_wait():
@@ -364,9 +352,9 @@ func _update_clock_hud() -> void:
 		_target_marker.position = target_pos - Vector2(8.0, 12.0)
 		if _is_wait_selecting:
 			_clock_label.text = "%s\nSET %s" % [_clock_label.text, _time_string_for_angle(_wait_target_angle_deg)]
-			_hint_label.text = "[T] Confirm wait"
+			_hint_label.text = "[Enter] Confirm  [Esc/T] Cancel"
 		elif _is_wait_advancing:
-			_hint_label.text = "Waiting... [T] cancel"
+			_hint_label.text = "Waiting... [Esc/T] cancel"
 		else:
 			_hint_label.text = "[T] Wait"
 			if not _can_start_wait():
