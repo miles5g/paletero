@@ -34,6 +34,10 @@ const ROW_SELECTED_ALPHA_LO := 0.28
 const _PHYSICAL_ITEM_SCENE: PackedScene = preload("res://PhysicalItem.tscn")
 const _PHOTO_BOOTH_SCRIPT: Script = preload("res://item_photo_booth.gd")
 const MAP_VIEWPORT_SIZE: Vector2i = Vector2i(256, 256)
+const MAP_CAMERA_DEFAULT_SIZE: float = 120.0
+const MAP_CAMERA_MIN_SIZE: float = 48.0
+const MAP_CAMERA_MAX_SIZE: float = 220.0
+const MAP_CAMERA_ZOOM_STEP: float = 12.0
 const MAP_WORLD_MIN_X: float = -14.0
 const MAP_WORLD_MAX_X: float = 14.0
 const MAP_WORLD_MIN_Z: float = -55.0
@@ -96,6 +100,7 @@ var _row_pulse_targets: Dictionary = {}
 
 func _ready() -> void:
 	set_process(true)
+	visibility_changed.connect(_on_inventory_visibility_changed)
 	_apply_panel_borders()
 	_item_list = get_node(
 		"OuterMargin/MainContainer/CenterPanel/CenterColumn/CenterList/ItemListVBox"
@@ -408,6 +413,8 @@ func _build_map_view(map_root: Control) -> void:
 	_map_viewport.own_world_3d = true
 	_map_viewport.msaa_3d = Viewport.MSAA_DISABLED
 	_map_view.add_child(_map_viewport)
+	if not _map_view.gui_input.is_connected(_on_map_view_gui_input):
+		_map_view.gui_input.connect(_on_map_view_gui_input)
 
 	var map_world_root := Node3D.new()
 	map_world_root.name = "MapWorldRoot"
@@ -417,7 +424,7 @@ func _build_map_view(map_root: Control) -> void:
 	_map_camera = Camera3D.new()
 	_map_camera.name = "MapTopCamera"
 	_map_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	_map_camera.size = 120.0
+	_map_camera.size = MAP_CAMERA_DEFAULT_SIZE
 	_map_camera.near = 0.1
 	_map_camera.far = 500.0
 	_map_camera.position = Vector3(0.0, 140.0, 0.0)
@@ -519,6 +526,39 @@ func _process(_delta: float) -> void:
 		return
 	_resolve_known_owners()
 	_update_map_markers()
+
+
+func _on_map_view_gui_input(event: InputEvent) -> void:
+	if _active_section != Section.MAP or not visible or _map_camera == null:
+		return
+	if event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		if not mb.pressed:
+			return
+		if mb.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_map_camera.size = clampf(
+				_map_camera.size - MAP_CAMERA_ZOOM_STEP,
+				MAP_CAMERA_MIN_SIZE,
+				MAP_CAMERA_MAX_SIZE
+			)
+			accept_event()
+		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_map_camera.size = clampf(
+				_map_camera.size + MAP_CAMERA_ZOOM_STEP,
+				MAP_CAMERA_MIN_SIZE,
+				MAP_CAMERA_MAX_SIZE
+			)
+			accept_event()
+
+
+func _on_inventory_visibility_changed() -> void:
+	_reset_map_zoom()
+
+
+func _reset_map_zoom() -> void:
+	if _map_camera == null:
+		return
+	_map_camera.size = MAP_CAMERA_DEFAULT_SIZE
 
 
 func _update_map_markers() -> void:
@@ -651,10 +691,10 @@ func _build_map_proxy_geometry(root: Node3D) -> void:
 	root.add_child(ramp)
 
 
-func _add_map_box(root: Node3D, size: Vector3, pos: Vector3, mat: Material) -> void:
+func _add_map_box(root: Node3D, box_size: Vector3, pos: Vector3, mat: Material) -> void:
 	var mi := MeshInstance3D.new()
 	var bm := BoxMesh.new()
-	bm.size = size
+	bm.size = box_size
 	mi.mesh = bm
 	mi.material_override = mat
 	mi.layers = 1 << (MAP_STRUCTURAL_LAYER - 1)

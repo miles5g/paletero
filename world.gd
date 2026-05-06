@@ -337,7 +337,7 @@ func _heading_degrees_from_player(player: CharacterBody3D) -> float:
 
 func _compass_bar_text(heading_deg: float) -> String:
 	var width := 41
-	var center := width / 2
+	var center := int(width / 2.0)
 	var chars := PackedStringArray()
 	for _i in range(width):
 		chars.append(" ")
@@ -449,6 +449,9 @@ func _ready() -> void:
 	hand_slots.add_child(left_slot)
 	hand_slots.add_child(right_slot)
 	hud.add_child(hand_slots)
+
+	var minimap_hud := preload("res://minimap_hud.gd").new()
+	hud.add_child(minimap_hud)
 
 	var inv_menu: Node = load("res://MasterHUD.tscn").instantiate()
 	if inv_menu is Control:

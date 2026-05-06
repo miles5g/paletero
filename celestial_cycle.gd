@@ -174,8 +174,12 @@ func _apply_cycle_visuals() -> void:
 	if _pivot == null:
 		return
 	_pivot.rotation_degrees.x = _cycle_angle_deg
-	_sun_orb.look_at(Vector3.ZERO, Vector3.UP)
-	_sun_light.look_at(Vector3.ZERO, Vector3.UP)
+	var sun_to_origin := Vector3.ZERO - _sun_orb.global_position
+	var sun_forward := sun_to_origin.normalized() if sun_to_origin.length_squared() > 1e-6 else Vector3.FORWARD
+	var dot_up := absf(sun_forward.dot(Vector3.UP))
+	var safe_up := Vector3.UP if dot_up < 0.995 else Vector3.FORWARD
+	_sun_orb.look_at(Vector3.ZERO, safe_up)
+	_sun_light.look_at(Vector3.ZERO, safe_up)
 
 	var altitude: float = sin(deg_to_rad(_cycle_angle_deg))
 	var daylight: float = clampf(altitude, 0.0, 1.0)
