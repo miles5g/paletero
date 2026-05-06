@@ -5,6 +5,7 @@ const FLOOR_ALBEDO_TEXTURE_RES: int = 256
 const _PHOTO_BOOTH_SCRIPT: Script = preload("res://item_photo_booth.gd")
 const _PHOTO_BOOTH_VISUAL_LAYER: int = 2
 const _PHYSICAL_ITEM_SCENE: PackedScene = preload("res://PhysicalItem.tscn")
+const _CELESTIAL_CYCLE_SCRIPT: Script = preload("res://celestial_cycle.gd")
 
 var _scanline_overlay: ColorRect = null
 
@@ -410,21 +411,18 @@ func _ready() -> void:
 
 	add_child(hud)
 
-	# Gritty world mood: dark overcast sky + dense fog.
+	# Base world environment values; celestial controller animates these over time.
 	var world_env := WorldEnvironment.new()
 	world_env.name = "WorldEnvironment"
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
-	# Slightly lifted from true black so distant silhouettes read against “overcast void.”
-	env.background_color = Color(0.065, 0.07, 0.088)
+	env.background_color = Color(0.2, 0.19, 0.2)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	# Faint deep blue-grey fill: enough to read floor grit in shadow, still hostile.
-	env.ambient_light_color = Color(0.14, 0.15, 0.22)
-	env.ambient_light_energy = 1.22
+	env.ambient_light_color = Color(0.28, 0.25, 0.24)
+	env.ambient_light_energy = 1.1
 	env.fog_enabled = true
-	env.fog_light_color = Color(0.22, 0.23, 0.28)
-	# Claustrophobic visibility: most scene detail fades by ~15–20m; slightly softer near camera.
-	env.fog_density = 0.058
+	env.fog_light_color = Color(0.36, 0.33, 0.31)
+	env.fog_density = 0.052
 	env.fog_sky_affect = 1.0
 	env.fog_aerial_perspective = 0.6
 	# Faint bloom so bright UI / spec hits read PS2-era against the dark grade.
@@ -437,15 +435,11 @@ func _ready() -> void:
 	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
 	world_env.environment = env
 	add_child(world_env)
-
-	# 1. Create the Sun
-	var sun = DirectionalLight3D.new()
-	sun.shadow_enabled = true
-	sun.light_energy = 0.62
-	sun.light_color = Color(0.58, 0.62, 0.72)
-	sun.position = Vector3(0, 10, 0)
-	sun.rotation_degrees = Vector3(-45, 45, 0)
-	add_child(sun)
+	# 1. Create celestial world-clock: 30 min full orbit, synced sun + environment gradient.
+	var celestial_cycle: CelestialCycle = _CELESTIAL_CYCLE_SCRIPT.new() as CelestialCycle
+	celestial_cycle.name = "CelestialCycle"
+	add_child(celestial_cycle)
+	celestial_cycle.setup(world_env)
 
 	# 2. Street layout: asphalt lane + curbs + sidewalk slabs (procedural StaticBodies).
 	_build_street_layout(self)

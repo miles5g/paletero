@@ -67,6 +67,7 @@ var _right_punch_tw: Tween = null
 var _cam_jitter_tw: Tween = null
 var _swap_hands_tw: Tween = null
 var _player_transparency_target: float = 0.0
+var _wait_t_prev_down: bool = false
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -112,6 +113,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		if not _is_inventory_menu_open() and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not is_pushing:
 			_drop_one_held_item()
 		return
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_T:
+		_request_wait_toggle()
+		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and _camera and not _is_inventory_menu_open():
 		rotate_y(-event.relative.x * mouse_sensitivity)
 		_camera.rotate_object_local(Vector3.RIGHT, -event.relative.y * mouse_sensitivity)
@@ -119,6 +123,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		_camera.rotation_degrees.x = clampf(pitch, -80.0, 80.0)
 
 func _physics_process(delta: float) -> void:
+	var t_down := Input.is_key_pressed(KEY_T)
+	if t_down and not _wait_t_prev_down:
+		_request_wait_toggle()
+	_wait_t_prev_down = t_down
 	if Input.is_action_just_pressed("toggle_inventory") and _can_toggle_cart_inventory():
 		_toggle_inventory_menu()
 	_update_pickup_target_and_prompt()
@@ -855,6 +863,15 @@ func _toggle_inventory_menu() -> void:
 			panel.refresh()
 	else:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+func _request_wait_toggle() -> void:
+	var w := get_parent()
+	if w == null:
+		return
+	var cycle := w.get_node_or_null("CelestialCycle")
+	if cycle != null and cycle.has_method("request_wait_toggle"):
+		cycle.call("request_wait_toggle")
 
 
 func _can_uncrouch_to_stand() -> bool:
