@@ -60,6 +60,7 @@ var _right_punch_z: float = 0.0
 var _left_punch_tw: Tween = null
 var _right_punch_tw: Tween = null
 var _cam_jitter_tw: Tween = null
+var _player_transparency_target: float = 0.0
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -142,6 +143,7 @@ func _physics_process(delta: float) -> void:
 	move_and_slide()
 	_update_free_arms_visual(delta, input_dir.length() > 0.01 and is_on_floor())
 	_update_held_item_transform()
+	_update_player_occlusion_fade(delta)
 
 	if is_pushing and current_cart != null:
 		current_cart.sleeping = false
@@ -155,6 +157,54 @@ func _physics_process(delta: float) -> void:
 		if body is RigidBody3D and (not is_pushing or body != current_cart):
 			var force_dir = -collision.get_normal()
 			body.apply_central_impulse(force_dir * velocity.length() * push_force)
+
+func _candidate_cart_for_occlusion() -> RigidBody3D:
+	if current_cart != null and is_instance_valid(current_cart):
+		return current_cart
+	var nearest: RigidBody3D = null
+	var nearest_d2 := 8.0 * 8.0
+	var face := -global_transform.basis.z
+	face.y = 0.0
+	if face.length_squared() < 1e-6:
+		face = Vector3.FORWARD
+	face = face.normalized()
+	for c in get_tree().get_nodes_in_group("carts"):
+		var cart := c as RigidBody3D
+		if cart == null or not is_instance_valid(cart):
+			continue
+		var to_cart := cart.global_position - global_position
+		var to_cart_xz := Vector3(to_cart.x, 0.0, to_cart.z)
+		var d2 := to_cart_xz.length_squared()
+		if d2 > nearest_d2:
+			continue
+		if to_cart_xz.length_squared() > 1e-6:
+			var dot_face := to_cart_xz.normalized().dot(face)
+			if dot_face < 0.1:
+				continue
+		nearest_d2 = d2
+		nearest = cart
+	return nearest
+
+func _update_player_occlusion_fade(delta: float) -> void:
+	if _camera == null or _mesh_instance == null:
+		return
+	if not is_pushing or current_cart == null or not is_instance_valid(current_cart):
+		_player_transparency_target = lerpf(_player_transparency_target, 0.0, minf(1.0, delta * 10.0))
+		_mesh_instance.transparency = _player_transparency_target
+		return
+	var blocked := false
+	var cam_pos := _camera.global_transform.origin
+	var cart_focus := current_cart.global_position + Vector3.UP * 0.35
+	var q := PhysicsRayQueryParameters3D.create(cam_pos, cart_focus)
+	q.collision_mask = collision_mask
+	var hit: Dictionary = get_world_3d().direct_space_state.intersect_ray(q)
+	if not hit.is_empty() and hit.has("collider"):
+		var collider := hit["collider"] as Object
+		# If camera->cart line first hits the player, player is blocking cart view.
+		blocked = collider == self
+	var fade_target := 0.5 if blocked else 0.0
+	_player_transparency_target = lerpf(_player_transparency_target, fade_target, minf(1.0, delta * 10.0))
+	_mesh_instance.transparency = _player_transparency_target
 
 func _update_free_arms_visual(delta: float, moving: bool) -> void:
 	if _push_arm_l == null or _push_arm_r == null or _push_forearm_l == null or _push_forearm_r == null:
