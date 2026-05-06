@@ -104,6 +104,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not _is_inventory_menu_open():
 			punch_right()
 		return
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_Q:
+		_swap_hand_items()
+		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and _camera and not _is_inventory_menu_open():
 		rotate_y(-event.relative.x * mouse_sensitivity)
 		_camera.rotate_object_local(Vector3.RIGHT, -event.relative.y * mouse_sensitivity)
@@ -271,6 +274,25 @@ func _refresh_hand_slot_hud() -> void:
 	var right_empty := w.get_node_or_null("HUD/HandSlots/RightHandSlot/EmptyMark") as Label
 	if right_empty != null:
 		right_empty.visible = not (_right_hand_item != null and is_instance_valid(_right_hand_item))
+
+func _swap_hand_items() -> void:
+	if _is_inventory_menu_open():
+		return
+	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+		return
+	if _right_hand_item == null and _left_hand_item == null:
+		return
+	var tmp_item := _right_hand_item
+	_right_hand_item = _left_hand_item
+	_left_hand_item = tmp_item
+	var tmp_layer := _right_hand_prev_layer
+	_right_hand_prev_layer = _left_hand_prev_layer
+	_left_hand_prev_layer = tmp_layer
+	var tmp_mask := _right_hand_prev_mask
+	_right_hand_prev_mask = _left_hand_prev_mask
+	_left_hand_prev_mask = tmp_mask
+	_update_held_items_transform()
+	_refresh_hand_slot_hud()
 
 func _apply_punch_camera_jitter(side: float) -> void:
 	if _camera == null:
