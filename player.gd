@@ -313,14 +313,10 @@ func punch_right() -> void:
 	_apply_punch_camera_jitter(1.0)
 
 func _interact() -> void:
-	if _has_any_held_item():
-		var cart_for_store := _resolve_cart_for_inventory()
-		if cart_for_store != null and cart_for_store.has_method("is_player_in_grab_range") and cart_for_store.is_player_in_grab_range(self):
-			_store_one_held_item_in_cart(cart_for_store)
-		else:
-			_drop_one_held_item()
-		return
 	if _try_hold_targeted_item():
+		return
+	if _has_any_held_item():
+		# Pickup-first pass: while tuning hand equip behavior, ignore drop/store on E.
 		return
 	if is_pushing:
 		_detach_from_cart()
@@ -362,6 +358,13 @@ func _try_hold_targeted_item() -> bool:
 	if w != null and w.has_method("set_interaction_prompt_text"):
 		w.set_interaction_prompt_text("[E] Drop held item")
 	return true
+
+func _next_free_hand_name() -> String:
+	if _right_hand_item == null or not is_instance_valid(_right_hand_item):
+		return "Right"
+	if _left_hand_item == null or not is_instance_valid(_left_hand_item):
+		return "Left"
+	return ""
 
 
 func _store_one_held_item_in_cart(cart: RigidBody3D) -> void:
@@ -467,6 +470,15 @@ func _update_held_items_transform() -> void:
 		_left_hand_item.global_position = _left_hand_world_pos
 		_left_hand_item.global_basis = Basis.looking_at(fwd, Vector3.UP)
 
+func _is_item_currently_held(item: PhysicalItem) -> bool:
+	if item == null or not is_instance_valid(item):
+		return false
+	if _right_hand_item != null and is_instance_valid(_right_hand_item) and item == _right_hand_item:
+		return true
+	if _left_hand_item != null and is_instance_valid(_left_hand_item) and item == _left_hand_item:
+		return true
+	return false
+
 
 func _looked_physical_item() -> PhysicalItem:
 	if _camera == null:
@@ -482,7 +494,9 @@ func _looked_physical_item() -> PhysicalItem:
 	if hit.has("collider"):
 		var collider: Object = hit["collider"] as Object
 		if collider is PhysicalItem:
-			return collider as PhysicalItem
+			var held_hit := collider as PhysicalItem
+			if not _is_item_currently_held(held_hit):
+				return held_hit
 	return _nearest_physical_item()
 
 
@@ -493,6 +507,8 @@ func _nearest_physical_item() -> PhysicalItem:
 	for n in get_tree().get_nodes_in_group("physical_items"):
 		var item := n as PhysicalItem
 		if item == null or not is_instance_valid(item):
+			continue
+		if _is_item_currently_held(item):
 			continue
 		var d2 := origin.distance_squared_to(item.global_position)
 		if d2 <= nearest_d2:
@@ -507,21 +523,14 @@ func _update_pickup_target_and_prompt() -> void:
 	var w := get_parent()
 	if w == null:
 		return
-	if _has_any_held_item():
-		var cart_for_store := _resolve_cart_for_inventory()
-		if cart_for_store != null and cart_for_store.has_method("is_player_in_grab_range") and cart_for_store.is_player_in_grab_range(self):
-			if w.has_method("set_interaction_prompt_text") and w.has_method("set_grab_prompts_visible"):
-				w.set_interaction_prompt_text("[E] Store held item in cart")
-				w.set_grab_prompts_visible(true)
-			return
-		if w.has_method("set_interaction_prompt_text") and w.has_method("set_grab_prompts_visible"):
-			w.set_interaction_prompt_text("[E] Drop held item")
-			w.set_grab_prompts_visible(true)
-		return
 	var looked := _looked_physical_item()
 	_look_pickup_item = looked
+	var next_hand := _next_free_hand_name()
 	if looked != null and w.has_method("set_interaction_prompt_text") and w.has_method("set_grab_prompts_visible"):
-		w.set_interaction_prompt_text("[E] Pick up %s" % looked.display_name())
+		if next_hand != "":
+			w.set_interaction_prompt_text("[E] Equip %s (%s Hand)" % [looked.display_name(), next_hand])
+		else:
+			w.set_interaction_prompt_text("Hands full")
 		w.set_grab_prompts_visible(true)
 		return
 	if can_interact and w.has_method("set_interaction_prompt_text") and w.has_method("set_grab_prompts_visible"):
