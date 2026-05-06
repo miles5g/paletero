@@ -50,9 +50,14 @@ var _push_arm_r: MeshInstance3D = null
 var _push_forearm_l: MeshInstance3D = null
 var _push_forearm_r: MeshInstance3D = null
 var _look_pickup_item: PhysicalItem = null
-var _held_item: PhysicalItem = null
-var _held_item_prev_layer: int = 1
-var _held_item_prev_mask: int = 1
+var _right_hand_item: PhysicalItem = null
+var _left_hand_item: PhysicalItem = null
+var _right_hand_prev_layer: int = 1
+var _right_hand_prev_mask: int = 1
+var _left_hand_prev_layer: int = 1
+var _left_hand_prev_mask: int = 1
+var _right_hand_world_pos: Vector3 = Vector3.ZERO
+var _left_hand_world_pos: Vector3 = Vector3.ZERO
 var _arm_anim_time: float = 0.0
 var _arm_anim_weight: float = 0.0
 var _left_punch_z: float = 0.0
@@ -78,6 +83,7 @@ func _ready() -> void:
 		_capsule_shape = _collision_shape.shape
 		_stand_shape_height = _capsule_shape.height
 	_create_push_arms()
+	_refresh_hand_slot_hud()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
@@ -142,7 +148,7 @@ func _physics_process(delta: float) -> void:
 
 	move_and_slide()
 	_update_free_arms_visual(delta, input_dir.length() > 0.01 and is_on_floor())
-	_update_held_item_transform()
+	_update_held_items_transform()
 	_update_player_occlusion_fade(delta)
 
 	if is_pushing and current_cart != null:
@@ -231,6 +237,8 @@ func _update_free_arms_visual(delta: float, moving: bool) -> void:
 	var right_punch_amt := clampf(-_right_punch_z / 0.19, 0.0, 1.0)
 	var left_hand := left_shoulder + fwd * (0.34 + left_punch_amt * 0.28) + right * -0.18 + up * -0.19
 	var right_hand := right_shoulder + fwd * (0.34 + right_punch_amt * 0.28) + right * 0.18 + up * -0.19
+	_left_hand_world_pos = left_hand
+	_right_hand_world_pos = right_hand
 	var left_elbow := _arm_elbow_target(left_shoulder, left_hand, -1.0)
 	var right_elbow := _arm_elbow_target(right_shoulder, right_hand, 1.0)
 	_stretch_arm_between(_push_arm_l, left_shoulder, left_elbow)
@@ -239,10 +247,7 @@ func _update_free_arms_visual(delta: float, moving: bool) -> void:
 	_stretch_arm_between(_push_forearm_r, right_elbow, right_hand)
 
 func _hands_empty_for_punch() -> bool:
-	# Gameplay truth: we only have one physical held item, so “hands empty” == no held item.
-	if _held_item != null and is_instance_valid(_held_item):
-		return false
-	return true
+	return not _has_any_held_item()
 
 func _can_punch() -> bool:
 	if _is_inventory_menu_open():
@@ -252,6 +257,20 @@ func _can_punch() -> bool:
 	if is_pushing:
 		return false
 	return _hands_empty_for_punch()
+
+func _has_any_held_item() -> bool:
+	return (_right_hand_item != null and is_instance_valid(_right_hand_item)) or (_left_hand_item != null and is_instance_valid(_left_hand_item))
+
+func _refresh_hand_slot_hud() -> void:
+	var w := get_parent()
+	if w == null:
+		return
+	var left_empty := w.get_node_or_null("HUD/HandSlots/LeftHandSlot/EmptyMark") as Label
+	if left_empty != null:
+		left_empty.visible = not (_left_hand_item != null and is_instance_valid(_left_hand_item))
+	var right_empty := w.get_node_or_null("HUD/HandSlots/RightHandSlot/EmptyMark") as Label
+	if right_empty != null:
+		right_empty.visible = not (_right_hand_item != null and is_instance_valid(_right_hand_item))
 
 func _apply_punch_camera_jitter(side: float) -> void:
 	if _camera == null:
@@ -294,12 +313,12 @@ func punch_right() -> void:
 	_apply_punch_camera_jitter(1.0)
 
 func _interact() -> void:
-	if _held_item != null:
+	if _has_any_held_item():
 		var cart_for_store := _resolve_cart_for_inventory()
 		if cart_for_store != null and cart_for_store.has_method("is_player_in_grab_range") and cart_for_store.is_player_in_grab_range(self):
-			_store_held_item_in_cart(cart_for_store)
+			_store_one_held_item_in_cart(cart_for_store)
 		else:
-			_drop_held_item()
+			_drop_one_held_item()
 		return
 	if _try_hold_targeted_item():
 		return
@@ -317,35 +336,52 @@ func _interact() -> void:
 func _try_hold_targeted_item() -> bool:
 	if _look_pickup_item == null or not is_instance_valid(_look_pickup_item):
 		return false
-	_held_item = _look_pickup_item
+	if _right_hand_item != null and is_instance_valid(_right_hand_item) and _left_hand_item != null and is_instance_valid(_left_hand_item):
+		return false
+	var picked := _look_pickup_item
 	_look_pickup_item = null
-	_held_item_prev_layer = _held_item.collision_layer
-	_held_item_prev_mask = _held_item.collision_mask
-	_held_item.freeze = true
-	_held_item.sleeping = true
-	_held_item.collision_layer = 0
-	_held_item.collision_mask = 0
-	_held_item.linear_velocity = Vector3.ZERO
-	_held_item.angular_velocity = Vector3.ZERO
-	_update_held_item_transform()
+	picked.freeze = true
+	picked.sleeping = true
+	picked.linear_velocity = Vector3.ZERO
+	picked.angular_velocity = Vector3.ZERO
+	if _right_hand_item == null or not is_instance_valid(_right_hand_item):
+		_right_hand_item = picked
+		_right_hand_prev_layer = picked.collision_layer
+		_right_hand_prev_mask = picked.collision_mask
+		_right_hand_item.collision_layer = 0
+		_right_hand_item.collision_mask = 0
+	else:
+		_left_hand_item = picked
+		_left_hand_prev_layer = picked.collision_layer
+		_left_hand_prev_mask = picked.collision_mask
+		_left_hand_item.collision_layer = 0
+		_left_hand_item.collision_mask = 0
+	_update_held_items_transform()
+	_refresh_hand_slot_hud()
 	var w := get_parent()
 	if w != null and w.has_method("set_interaction_prompt_text"):
-		w.set_interaction_prompt_text("[E] Drop %s" % _held_item.display_name())
+		w.set_interaction_prompt_text("[E] Drop held item")
 	return true
 
 
-func _store_held_item_in_cart(cart: RigidBody3D) -> void:
-	if _held_item == null or not is_instance_valid(_held_item):
+func _store_one_held_item_in_cart(cart: RigidBody3D) -> void:
+	var hand_item := _left_hand_item if _left_hand_item != null and is_instance_valid(_left_hand_item) else _right_hand_item
+	if hand_item == null or not is_instance_valid(hand_item):
 		return
 	if not cart.has_method("add_item_to_inventory"):
 		return
-	var res: ItemResource = _held_item.take_item_resource()
+	var res: ItemResource = hand_item.take_item_resource()
 	if res == null:
-		_drop_held_item()
+		_drop_one_held_item()
 		return
 	cart.add_item_to_inventory(res)
-	_held_item.queue_free()
-	_held_item = null
+	if hand_item == _left_hand_item:
+		_left_hand_item.queue_free()
+		_left_hand_item = null
+	else:
+		_right_hand_item.queue_free()
+		_right_hand_item = null
+	_refresh_hand_slot_hud()
 	if cart.has_method("calculate_total_weight"):
 		cart.calculate_total_weight()
 	if cart.has_method("update_mass"):
@@ -355,15 +391,13 @@ func _store_held_item_in_cart(cart: RigidBody3D) -> void:
 		panel.refresh()
 
 
-func _drop_held_item() -> void:
-	if _held_item == null or not is_instance_valid(_held_item):
-		_held_item = null
+func _drop_hand_item(dropped_item: PhysicalItem, prev_layer: int, prev_mask: int, hand_sign: float) -> void:
+	if dropped_item == null or not is_instance_valid(dropped_item):
 		return
-	var dropped_item: PhysicalItem = _held_item
 	dropped_item.freeze = false
 	dropped_item.sleeping = false
-	dropped_item.collision_layer = _held_item_prev_layer
-	dropped_item.collision_mask = _held_item_prev_mask
+	dropped_item.collision_layer = prev_layer
+	dropped_item.collision_mask = prev_mask
 	var fwd := -global_transform.basis.z
 	fwd.y = 0.0
 	if fwd.length_squared() < 1e-6:
@@ -375,7 +409,7 @@ func _drop_held_item() -> void:
 		right = Vector3.RIGHT
 	right = right.normalized()
 	# Drop above head with random lateral bias so it reliably rolls off.
-	var side_sign := -1.0 if randf() < 0.5 else 1.0
+	var side_sign := hand_sign
 	var side_push := right * side_sign * randf_range(0.65, 1.05)
 	var fwd_push := fwd * randf_range(0.2, 0.55)
 	var lateral := (side_push + fwd_push).normalized()
@@ -404,26 +438,34 @@ func _drop_held_item() -> void:
 	)
 	dropped_item.apply_central_impulse(lateral * randf_range(1.35, 1.95) + up * 0.06)
 	dropped_item.apply_torque_impulse(Vector3(randf_range(0.85, 1.45), 0.0, randf_range(-1.45, -0.85) * side_sign))
-	_held_item = null
 
 
-func _update_held_item_transform() -> void:
-	if _held_item == null or not is_instance_valid(_held_item):
+func _drop_one_held_item() -> void:
+	if _left_hand_item != null and is_instance_valid(_left_hand_item):
+		var item_l := _left_hand_item
+		_left_hand_item = null
+		_drop_hand_item(item_l, _left_hand_prev_layer, _left_hand_prev_mask, -1.0)
+		_refresh_hand_slot_hud()
 		return
+	if _right_hand_item != null and is_instance_valid(_right_hand_item):
+		var item_r := _right_hand_item
+		_right_hand_item = null
+		_drop_hand_item(item_r, _right_hand_prev_layer, _right_hand_prev_mask, 1.0)
+		_refresh_hand_slot_hud()
+
+
+func _update_held_items_transform() -> void:
 	var fwd := -global_transform.basis.z
 	fwd.y = 0.0
 	if fwd.length_squared() < 1e-6:
 		fwd = Vector3.FORWARD
 	fwd = fwd.normalized()
-	var right := global_transform.basis.x
-	right.y = 0.0
-	if right.length_squared() < 1e-6:
-		right = Vector3.RIGHT
-	right = right.normalized()
-	var chest := global_position + Vector3.UP * HELD_ITEM_HEIGHT
-	var hold_pos := chest + fwd * HELD_ITEM_DIST + right * HELD_ITEM_SIDE
-	_held_item.global_position = hold_pos
-	_held_item.global_basis = Basis.looking_at(fwd, Vector3.UP)
+	if _right_hand_item != null and is_instance_valid(_right_hand_item):
+		_right_hand_item.global_position = _right_hand_world_pos
+		_right_hand_item.global_basis = Basis.looking_at(fwd, Vector3.UP)
+	if _left_hand_item != null and is_instance_valid(_left_hand_item):
+		_left_hand_item.global_position = _left_hand_world_pos
+		_left_hand_item.global_basis = Basis.looking_at(fwd, Vector3.UP)
 
 
 func _looked_physical_item() -> PhysicalItem:
@@ -465,16 +507,15 @@ func _update_pickup_target_and_prompt() -> void:
 	var w := get_parent()
 	if w == null:
 		return
-	if _held_item != null and is_instance_valid(_held_item):
-		var hold_name := _held_item.display_name()
+	if _has_any_held_item():
 		var cart_for_store := _resolve_cart_for_inventory()
 		if cart_for_store != null and cart_for_store.has_method("is_player_in_grab_range") and cart_for_store.is_player_in_grab_range(self):
 			if w.has_method("set_interaction_prompt_text") and w.has_method("set_grab_prompts_visible"):
-				w.set_interaction_prompt_text("[E] Store %s in cart" % hold_name)
+				w.set_interaction_prompt_text("[E] Store held item in cart")
 				w.set_grab_prompts_visible(true)
 			return
 		if w.has_method("set_interaction_prompt_text") and w.has_method("set_grab_prompts_visible"):
-			w.set_interaction_prompt_text("[E] Drop %s" % hold_name)
+			w.set_interaction_prompt_text("[E] Drop held item")
 			w.set_grab_prompts_visible(true)
 		return
 	var looked := _looked_physical_item()
@@ -613,6 +654,8 @@ func _update_push_arms_visual() -> void:
 		handle_gp = current_cart.global_position + cb * Vector3(0.0, 0.45, 0.75)
 	var left_target := _clamp_arm_reach_target(left_shoulder, handle_gp)
 	var right_target := _clamp_arm_reach_target(right_shoulder, handle_gp)
+	_left_hand_world_pos = left_target
+	_right_hand_world_pos = right_target
 	var left_elbow := _arm_elbow_target(left_shoulder, left_target, -1.0)
 	var right_elbow := _arm_elbow_target(right_shoulder, right_target, 1.0)
 	_stretch_arm_between(_push_arm_l, left_shoulder, left_elbow)
