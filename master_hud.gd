@@ -41,6 +41,7 @@ const MAP_CAMERA_ZOOM_STEP: float = 12.0
 const MAP_WAYPOINT_BEAM_HEIGHT: float = 40.0
 const MAP_WAYPOINT_BEAM_RADIUS: float = 0.16
 const MAP_WAYPOINT_BEAM_NODE: NodePath = NodePath("MapWaypointBeam")
+const MAP_WAYPOINT_REACHED_DIST: float = 1.35
 const MAP_WORLD_MIN_X: float = -14.0
 const MAP_WORLD_MAX_X: float = 14.0
 const MAP_WORLD_MIN_Z: float = -55.0
@@ -597,6 +598,11 @@ func _update_map_markers() -> void:
 		var fwd := _player_compass_forward(_player_owner)
 		_map_player_marker.rotation = _map_heading_rotation(fwd)
 		_map_player_marker.visible = true
+		if _has_waypoint:
+			var to_waypoint := _waypoint_world_pos - _player_owner.global_position
+			to_waypoint.y = 0.0
+			if to_waypoint.length() <= MAP_WAYPOINT_REACHED_DIST:
+				_clear_waypoint()
 	else:
 		_map_player_marker.visible = false
 	if _cart_owner != null and is_instance_valid(_cart_owner):
@@ -715,6 +721,15 @@ func _update_waypoint_beam() -> void:
 	if beam_root == null:
 		return
 	beam_root.global_position = _waypoint_world_pos
+
+
+func _clear_waypoint() -> void:
+	_has_waypoint = false
+	if _map_waypoint_marker != null:
+		_map_waypoint_marker.visible = false
+	if _waypoint_beam_root != null and is_instance_valid(_waypoint_beam_root):
+		_waypoint_beam_root.queue_free()
+	_waypoint_beam_root = null
 
 
 func _ensure_waypoint_beam() -> Node3D:

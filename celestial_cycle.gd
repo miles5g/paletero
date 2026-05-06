@@ -14,8 +14,9 @@ var _environment: Environment = null
 var _pivot: Node3D = null
 var _orbital_arm: Node3D = null
 var _sun_orb: MeshInstance3D = null
+var _sun_halo: MeshInstance3D = null
 var _sun_light: DirectionalLight3D = null
-var _cycle_angle_deg: float = 0.0
+var _cycle_angle_deg: float = 90.0
 var _debug_layer: CanvasLayer = null
 var _backdrop: ColorRect = null
 var _clock_canvas: Node2D = null
@@ -153,18 +154,40 @@ func _build_orbital_rig() -> void:
 	_sun_orb.mesh = sun_mesh
 	_sun_orb.position = Vector3(0.0, 0.0, -ORBIT_RADIUS)
 	var orb_mat := StandardMaterial3D.new()
-	orb_mat.albedo_color = Color(1.0, 0.9, 0.58)
+	orb_mat.albedo_color = Color(1.0, 0.74, 0.26)
 	orb_mat.emission_enabled = true
-	orb_mat.emission = Color(1.0, 0.72, 0.3)
-	orb_mat.emission_energy_multiplier = 5.2
+	orb_mat.emission = Color(1.0, 0.84, 0.3)
+	orb_mat.emission_energy_multiplier = 6.0
 	orb_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	orb_mat.disable_ambient_light = true
+	orb_mat.disable_fog = true
 	_sun_orb.material_override = orb_mat
 	_orbital_arm.add_child(_sun_orb)
+
+	# Add a larger transparent shell so the sun reads as radiating orange/yellow glow.
+	_sun_halo = MeshInstance3D.new()
+	_sun_halo.name = "SunHalo"
+	var halo_mesh := SphereMesh.new()
+	halo_mesh.radius = 15.8
+	halo_mesh.height = 31.6
+	_sun_halo.mesh = halo_mesh
+	var halo_mat := StandardMaterial3D.new()
+	halo_mat.albedo_color = Color(1.0, 0.66, 0.12, 0.0)
+	halo_mat.emission_enabled = true
+	halo_mat.emission = Color(1.0, 0.74, 0.2)
+	halo_mat.emission_energy_multiplier = 4.6
+	halo_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	halo_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	halo_mat.no_depth_test = true
+	halo_mat.disable_fog = true
+	halo_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_sun_halo.material_override = halo_mat
+	_sun_orb.add_child(_sun_halo)
 
 	_sun_light = DirectionalLight3D.new()
 	_sun_light.name = "SunLight"
 	_sun_light.shadow_enabled = true
+	_sun_light.shadow_opacity = 0.1
 	_sun_light.light_energy = 0.8
 	_sun_light.light_color = Color(1.0, 0.92, 0.74)
 	_sun_orb.add_child(_sun_light)
@@ -197,8 +220,21 @@ func _apply_cycle_visuals() -> void:
 	if orb_material:
 		var orb_glow := 1.8 + day_energy * 6.0 + horizon_band * 1.3
 		orb_material.emission_energy_multiplier = orb_glow
-		orb_material.albedo_color = _sun_color_for_altitude(maxf(altitude, -0.2))
-		orb_material.emission = _sun_color_for_altitude(altitude).lerp(Color(1.0, 0.86, 0.52), day_energy * 0.7)
+		var hot_orange := Color(1.0, 0.62, 0.18)
+		var warm_yellow := Color(1.0, 0.9, 0.34)
+		var core_t := clampf(day_energy * 0.85 + horizon_band * 0.35, 0.0, 1.0)
+		orb_material.albedo_color = hot_orange.lerp(warm_yellow, core_t)
+		orb_material.emission = hot_orange.lerp(warm_yellow, clampf(core_t + 0.12, 0.0, 1.0))
+	var halo_material := _sun_halo.material_override as StandardMaterial3D if _sun_halo != null else null
+	if halo_material:
+		var hot_orange := Color(1.0, 0.62, 0.18)
+		var warm_yellow := Color(1.0, 0.92, 0.36)
+		var halo_t := clampf(day_energy * 0.9 + horizon_band * 0.4, 0.0, 1.0)
+		var halo_alpha := clampf(0.12 + day_energy * 0.2 + horizon_band * 0.08, 0.06, 0.34)
+		var halo_col := hot_orange.lerp(warm_yellow, halo_t)
+		halo_material.albedo_color = Color(halo_col.r, halo_col.g, halo_col.b, halo_alpha)
+		halo_material.emission = hot_orange.lerp(warm_yellow, clampf(halo_t + 0.14, 0.0, 1.0))
+		halo_material.emission_energy_multiplier = 2.2 + day_energy * 4.0 + horizon_band * 1.2
 
 	if _environment == null:
 		return
@@ -219,7 +255,7 @@ func _apply_cycle_visuals() -> void:
 	_environment.ambient_light_color = amb_day_to_dusk.lerp(ambient_night, env_night)
 	_environment.ambient_light_energy = lerpf(1.62, 0.34, env_night)
 	_environment.fog_light_color = fog_day.lerp(fog_night, env_night)
-	_environment.fog_density = lerpf(0.022, 0.078, env_night)
+	_environment.fog_density = lerpf(0.012, 0.078, env_night)
 	_environment.glow_intensity = lerpf(0.82, 0.34, env_night)
 	_environment.glow_strength = lerpf(1.2, 0.86, env_night)
 	_environment.glow_hdr_threshold = lerpf(0.58, 0.76, env_night)

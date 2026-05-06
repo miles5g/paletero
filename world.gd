@@ -10,6 +10,7 @@ const _CELESTIAL_CYCLE_SCRIPT: Script = preload("res://celestial_cycle.gd")
 
 var _scanline_overlay: ColorRect = null
 var _compass_bar_label: Label = null
+var _compass_waypoint_label: Label = null
 var _compass_caret_label: Label = null
 
 
@@ -364,6 +365,33 @@ func _compass_bar_text(heading_deg: float) -> String:
 	return line
 
 
+func _relative_waypoint_degrees(player: CharacterBody3D) -> Dictionary:
+	var beam := get_node_or_null("MapWaypointBeam") as Node3D
+	if player == null or beam == null:
+		return {"has": false, "rel_deg": 0.0}
+	var to_waypoint := beam.global_position - player.global_position
+	to_waypoint.y = 0.0
+	if to_waypoint.length_squared() < 1e-6:
+		return {"has": false, "rel_deg": 0.0}
+	to_waypoint = to_waypoint.normalized()
+	var waypoint_heading := fposmod(rad_to_deg(atan2(to_waypoint.x, -to_waypoint.z)), 360.0)
+	var player_heading := _heading_degrees_from_player(player)
+	var rel := fposmod(waypoint_heading - player_heading + 180.0, 360.0) - 180.0
+	return {"has": true, "rel_deg": rel}
+
+
+func _compass_marker_line(width: int, rel_deg: float, marker: String) -> String:
+	if width <= 0:
+		return ""
+	var out := ""
+	for _i in range(width):
+		out += " "
+	var center := int(width / 2.0)
+	var x := center + int(round((rel_deg / 90.0) * float(center - 1)))
+	x = clampi(x, 0, width - 1)
+	return out.substr(0, x) + marker + out.substr(x + 1)
+
+
 func _update_compass_hud() -> void:
 	if _compass_bar_label == null:
 		return
@@ -372,7 +400,16 @@ func _update_compass_hud() -> void:
 		return
 	var heading_deg := _heading_degrees_from_player(player)
 	if _compass_bar_label != null:
-		_compass_bar_label.text = _compass_bar_text(heading_deg)
+		var line := _compass_bar_text(heading_deg)
+		var waypoint := _relative_waypoint_degrees(player)
+		var waypoint_line := ""
+		if bool(waypoint["has"]):
+			var rel_deg: float = waypoint["rel_deg"]
+			if absf(rel_deg) <= 95.0:
+				waypoint_line = _compass_marker_line(line.length(), rel_deg, "X")
+		_compass_bar_label.text = line
+		if _compass_waypoint_label != null:
+			_compass_waypoint_label.text = waypoint_line
 
 
 func set_grab_prompts_visible(v: bool) -> void:
@@ -498,6 +535,25 @@ func _ready() -> void:
 	compass_bar.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 0.95))
 	hud.add_child(compass_bar)
 	_compass_bar_label = compass_bar
+
+	var compass_waypoint := Label.new()
+	compass_waypoint.name = "CompassWaypoint"
+	compass_waypoint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	compass_waypoint.anchor_left = 0.5
+	compass_waypoint.anchor_right = 0.5
+	compass_waypoint.anchor_top = 1.0
+	compass_waypoint.anchor_bottom = 1.0
+	compass_waypoint.offset_left = -170.0
+	compass_waypoint.offset_top = -36.0
+	compass_waypoint.offset_right = 170.0
+	compass_waypoint.offset_bottom = -8.0
+	compass_waypoint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	compass_waypoint.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	compass_waypoint.add_theme_font_override("font", term_ui_font)
+	compass_waypoint.add_theme_font_size_override("font_size", 12)
+	compass_waypoint.add_theme_color_override("font_color", Color(1.0, 0.3, 0.3, 0.95))
+	hud.add_child(compass_waypoint)
+	_compass_waypoint_label = compass_waypoint
 
 	var compass_caret := Label.new()
 	compass_caret.name = "CompassCaret"
