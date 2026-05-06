@@ -6,6 +6,99 @@ const FLOOR_ALBEDO_TEXTURE_RES: int = 256
 var _scanline_overlay: ColorRect = null
 
 
+func _slot_stylebox() -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.0, 0.0, 0.0, 1.0)
+	sb.border_width_left = 2
+	sb.border_width_top = 2
+	sb.border_width_right = 2
+	sb.border_width_bottom = 2
+	sb.border_color = Color.WHITE
+	return sb
+
+
+func _make_dim_slot_placeholder() -> Texture2D:
+	var img := Image.create(24, 24, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0.2, 0.2, 0.22, 0.2))
+	for i in range(24):
+		img.set_pixel(i, 0, Color(0.8, 0.8, 0.86, 0.22))
+		img.set_pixel(i, 23, Color(0.8, 0.8, 0.86, 0.22))
+		img.set_pixel(0, i, Color(0.8, 0.8, 0.86, 0.22))
+		img.set_pixel(23, i, Color(0.8, 0.8, 0.86, 0.22))
+	var tex := ImageTexture.new()
+	tex.set_image(img)
+	return tex
+
+
+func _make_hand_slot(
+	slot_name: String,
+	hand_mark: String,
+	mark_on_left: bool,
+	placeholder_tex: Texture2D,
+	font: Font
+) -> Panel:
+	var slot := Panel.new()
+	slot.name = slot_name
+	slot.custom_minimum_size = Vector2(72, 72)
+	slot.size = Vector2(72, 72)
+	slot.add_theme_stylebox_override("panel", _slot_stylebox())
+	var icon := TextureRect.new()
+	icon.name = "Icon"
+	icon.texture = placeholder_tex
+	icon.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.anchor_left = 0.0
+	icon.anchor_top = 0.0
+	icon.anchor_right = 1.0
+	icon.anchor_bottom = 1.0
+	icon.offset_left = 10.0
+	icon.offset_top = 16.0
+	icon.offset_right = -10.0
+	icon.offset_bottom = -12.0
+	icon.modulate = Color(1.0, 1.0, 1.0, 0.2)
+	var empty_mark := Label.new()
+	empty_mark.name = "EmptyMark"
+	empty_mark.text = "EMPTY"
+	empty_mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	empty_mark.add_theme_font_override("font", font)
+	empty_mark.add_theme_font_size_override("font_size", 9)
+	empty_mark.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 0.24))
+	empty_mark.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	empty_mark.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	empty_mark.anchor_left = 0.0
+	empty_mark.anchor_top = 0.0
+	empty_mark.anchor_right = 1.0
+	empty_mark.anchor_bottom = 1.0
+	empty_mark.offset_left = 8.0
+	empty_mark.offset_top = 20.0
+	empty_mark.offset_right = -8.0
+	empty_mark.offset_bottom = -8.0
+	var mark := Label.new()
+	mark.name = "HandMark"
+	mark.text = hand_mark
+	mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mark.add_theme_font_override("font", font)
+	mark.add_theme_font_size_override("font_size", 12)
+	mark.add_theme_color_override("font_color", Color.WHITE)
+	mark.anchor_left = 0.0
+	mark.anchor_top = 0.0
+	mark.anchor_right = 0.0
+	mark.anchor_bottom = 0.0
+	mark.size = Vector2(12.0, 12.0)
+	mark.offset_top = 3.0
+	if mark_on_left:
+		mark.offset_left = 7.0
+	else:
+		mark.offset_left = 53.0
+	mark.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	mark.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	slot.add_child(icon)
+	slot.add_child(empty_mark)
+	slot.add_child(mark)
+	return slot
+
+
 func _make_floor_grit_texture(noise_seed: int) -> ImageTexture:
 	var img := Image.create(FLOOR_ALBEDO_TEXTURE_RES, FLOOR_ALBEDO_TEXTURE_RES, false, Image.FORMAT_RGBA8)
 	var noise := FastNoiseLite.new()
@@ -266,6 +359,28 @@ func _ready() -> void:
 	prompt_box.add_child(inventory_prompt)
 	prompt_box.add_child(interaction_label)
 	hud.add_child(prompt_box)
+
+	var hand_slots := Control.new()
+	hand_slots.name = "HandSlots"
+	hand_slots.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hand_slots.anchor_left = 0.0
+	hand_slots.anchor_right = 0.0
+	hand_slots.anchor_top = 1.0
+	hand_slots.anchor_bottom = 1.0
+	hand_slots.offset_left = 24.0
+	hand_slots.offset_top = -138.0
+	hand_slots.offset_right = 210.0
+	hand_slots.offset_bottom = -18.0
+	var term_hand_font := _make_terminal_font()
+	var slot_placeholder := _make_dim_slot_placeholder()
+	var left_slot := _make_hand_slot("LeftHandSlot", "L", false, slot_placeholder, term_hand_font)
+	var right_slot := _make_hand_slot("RightHandSlot", "R", true, slot_placeholder, term_hand_font)
+	# Keep a clear gap so 2px borders never touch/overlap.
+	left_slot.position = Vector2(8.0, 16.0)
+	right_slot.position = Vector2(88.0, 16.0)
+	hand_slots.add_child(left_slot)
+	hand_slots.add_child(right_slot)
+	hud.add_child(hand_slots)
 
 	var inv_menu: Node = load("res://MasterHUD.tscn").instantiate()
 	hud.add_child(inv_menu)
