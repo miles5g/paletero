@@ -358,20 +358,27 @@ func punch_right() -> void:
 	_apply_punch_camera_jitter(1.0)
 
 func _interact() -> void:
+	if is_pushing:
+		_detach_from_cart()
+		return
+	# Prioritize cart grab over any item interaction when in range.
+	for cart in get_tree().get_nodes_in_group("carts"):
+		if cart is RigidBody3D and cart.has_method("is_player_in_grab_range") and cart.is_player_in_grab_range(self):
+			_attach_to_cart(cart)
+			return
 	if _try_hold_targeted_item():
 		return
 	if _has_any_held_item():
 		# Pickup-first pass: while tuning hand equip behavior, ignore drop/store on E.
 		return
-	if is_pushing:
-		_detach_from_cart()
-		return
 	if not can_interact:
 		return
-	for cart in get_tree().get_nodes_in_group("carts"):
-		if cart is RigidBody3D and cart.has_method("is_player_in_grab_range") and cart.is_player_in_grab_range(self):
-			_attach_to_cart(cart)
-			return
+
+func _set_held_items_visible(v: bool) -> void:
+	if _right_hand_item != null and is_instance_valid(_right_hand_item):
+		_right_hand_item.visible = v
+	if _left_hand_item != null and is_instance_valid(_left_hand_item):
+		_left_hand_item.visible = v
 
 
 func _try_hold_targeted_item() -> bool:
@@ -568,6 +575,10 @@ func _update_pickup_target_and_prompt() -> void:
 	var w := get_parent()
 	if w == null:
 		return
+	if can_interact and w.has_method("set_interaction_prompt_text") and w.has_method("set_grab_prompts_visible"):
+		w.set_interaction_prompt_text("[E] Grab Cart")
+		w.set_grab_prompts_visible(true)
+		return
 	var looked := _looked_physical_item()
 	_look_pickup_item = looked
 	var next_hand := _next_free_hand_name()
@@ -604,6 +615,7 @@ func _attach_to_cart(cart: RigidBody3D) -> void:
 	cart.freeze = false
 	cart.sleeping = false
 	cart.can_sleep = false
+	_set_held_items_visible(false)
 	if _push_arm_l == null or _push_arm_r == null or _push_forearm_l == null or _push_forearm_r == null:
 		_create_push_arms()
 
@@ -770,6 +782,8 @@ func _detach_from_cart() -> void:
 		cart.can_sleep = true
 		remove_collision_exception_with(cart)
 	is_pushing = false
+	_set_held_items_visible(true)
+	_update_held_items_transform()
 	can_interact = cart != null and cart.has_method("is_player_in_grab_range") and cart.is_player_in_grab_range(self)
 	var wp := get_parent()
 	if wp != null and wp.has_method("set_grab_prompts_visible"):
