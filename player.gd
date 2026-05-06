@@ -53,12 +53,8 @@ var _look_pickup_item: PhysicalItem = null
 var _held_item: PhysicalItem = null
 var _held_item_prev_layer: int = 1
 var _held_item_prev_mask: int = 1
-var _tp_left_anchor: Node3D = null
-var _tp_right_anchor: Node3D = null
-var _tp_left_base_pos: Vector3 = Vector3.ZERO
-var _tp_right_base_pos: Vector3 = Vector3.ZERO
-var _tp_bob_time: float = 0.0
-var _tp_bob_weight: float = 0.0
+var _arm_anim_time: float = 0.0
+var _arm_anim_weight: float = 0.0
 var _left_punch_z: float = 0.0
 var _right_punch_z: float = 0.0
 var _left_punch_tw: Tween = null
@@ -80,91 +76,7 @@ func _ready() -> void:
 	if _collision_shape and _collision_shape.shape is CapsuleShape3D:
 		_capsule_shape = _collision_shape.shape
 		_stand_shape_height = _capsule_shape.height
-	_setup_third_person_arms()
-
-func _setup_third_person_arms() -> void:
-	if _camera == null:
-		return
-	_tp_left_anchor = get_node_or_null("LeftArmAnchor") as Node3D
-	if _tp_left_anchor == null:
-		_tp_left_anchor = Node3D.new()
-		_tp_left_anchor.name = "LeftArmAnchor"
-		add_child(_tp_left_anchor)
-	_tp_right_anchor = get_node_or_null("RightArmAnchor") as Node3D
-	if _tp_right_anchor == null:
-		_tp_right_anchor = Node3D.new()
-		_tp_right_anchor.name = "RightArmAnchor"
-		add_child(_tp_right_anchor)
-
-	# Shoulder-ish anchors in third-person space (relative to the player CharacterBody3D origin).
-	_tp_left_base_pos = Vector3(-0.42, 0.78, 0.12)
-	_tp_right_base_pos = Vector3(0.42, 0.78, 0.12)
-	_tp_left_anchor.position = _tp_left_base_pos
-	_tp_right_anchor.position = _tp_right_base_pos
-
-	_ensure_third_person_arm_mesh(_tp_left_anchor, "LeftArmMesh", -1.0)
-	_ensure_third_person_arm_mesh(_tp_right_anchor, "RightArmMesh", 1.0)
-
-func _ensure_third_person_arm_mesh(anchor: Node3D, mesh_name: String, side: float) -> void:
-	if anchor == null:
-		return
-	# Keep the original LeftArmMesh/RightArmMesh segment's placement,
-	# then extend it with a forearm that continues from the lower end.
-	var upper := anchor.get_node_or_null(mesh_name) as CSGCylinder3D
-	if upper == null:
-		upper = CSGCylinder3D.new()
-		upper.name = mesh_name
-		anchor.add_child(upper)
-
-	# Original-ish segment sizing (this is what you previously perceived as the "real" arm).
-	upper.radius = 0.06
-	upper.height = 0.62
-	upper.sides = 8
-	upper.smooth_faces = false
-	upper.position = Vector3(0.0, -0.28, 0.0)
-	upper.rotation_degrees = Vector3(16.0, 0.0, 28.0 * side)
-	upper.material = StandardMaterial3D.new()
-	var upper_mat := upper.material as StandardMaterial3D
-	if upper_mat != null:
-		upper_mat.albedo_color = Color(0.72, 0.54, 0.44)
-		upper_mat.roughness = 0.92
-
-	# Forearm segment starts from the actual upper-arm tip by parenting elbow to upper.
-	var elbow_name := "%sElbow" % mesh_name
-	var elbow := upper.get_node_or_null(elbow_name) as Node3D
-	if elbow == null:
-		var old_elbow := anchor.get_node_or_null(elbow_name) as Node3D
-		if old_elbow != null:
-			elbow = old_elbow
-			elbow.reparent(upper)
-		else:
-			elbow = Node3D.new()
-			elbow.name = elbow_name
-			upper.add_child(elbow)
-	elbow.position = Vector3(0.0, -upper.height * 0.5, 0.0)
-	elbow.rotation_degrees = Vector3.ZERO
-
-	var forearm_name := "%sForearm" % mesh_name
-	var forearm := elbow.get_node_or_null(forearm_name) as CSGCylinder3D
-	if forearm == null:
-		forearm = CSGCylinder3D.new()
-		forearm.name = forearm_name
-		elbow.add_child(forearm)
-
-	# Extra length beyond the original arm.
-	var forearm_height := 0.52
-	forearm.radius = 0.055
-	forearm.height = forearm_height
-	forearm.sides = 8
-	forearm.smooth_faces = false
-	# Cylinder is centered, so center it halfway down from the elbow pivot.
-	forearm.position = Vector3(0.0, -forearm_height * 0.5, 0.0)
-	forearm.rotation_degrees = Vector3(0.0, 0.0, 0.0)
-	forearm.material = StandardMaterial3D.new()
-	var forearm_mat := forearm.material as StandardMaterial3D
-	if forearm_mat != null:
-		forearm_mat.albedo_color = Color(0.72, 0.54, 0.44)
-		forearm_mat.roughness = 0.92
+	_create_push_arms()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
@@ -228,7 +140,7 @@ func _physics_process(delta: float) -> void:
 		velocity.z = move_toward(velocity.z, 0, move_speed)
 
 	move_and_slide()
-	_update_third_person_arms(delta, input_dir.length() > 0.01 and is_on_floor())
+	_update_free_arms_visual(delta, input_dir.length() > 0.01 and is_on_floor())
 	_update_held_item_transform()
 
 	if is_pushing and current_cart != null:
@@ -244,40 +156,37 @@ func _physics_process(delta: float) -> void:
 			var force_dir = -collision.get_normal()
 			body.apply_central_impulse(force_dir * velocity.length() * push_force)
 
-func _update_third_person_arms(delta: float, moving: bool) -> void:
-	if _tp_left_anchor == null or _tp_right_anchor == null:
+func _update_free_arms_visual(delta: float, moving: bool) -> void:
+	if _push_arm_l == null or _push_arm_r == null or _push_forearm_l == null or _push_forearm_r == null:
 		return
 	var target_weight := 1.0 if moving else 0.0
-	_tp_bob_weight = lerpf(_tp_bob_weight, target_weight, minf(1.0, delta * 8.0))
-	_tp_bob_time += delta * (8.6 + velocity.length() * 0.5)
-	var bob_y := sin(_tp_bob_time) * 0.02 * _tp_bob_weight
-	_tp_left_anchor.position = _tp_left_base_pos + Vector3(0.0, bob_y, _left_punch_z)
-	_tp_right_anchor.position = _tp_right_base_pos + Vector3(0.0, bob_y, _right_punch_z)
+	_arm_anim_weight = lerpf(_arm_anim_weight, target_weight, minf(1.0, delta * 8.0))
+	_arm_anim_time += delta * (8.6 + velocity.length() * 0.5)
+	var bob_y := sin(_arm_anim_time) * 0.05 * _arm_anim_weight
+	var b := global_transform.basis
+	var fwd := -b.z
+	fwd.y = 0.0
+	if fwd.length_squared() < 1e-6:
+		fwd = Vector3.FORWARD
+	fwd = fwd.normalized()
+	var right := b.x
+	right.y = 0.0
+	if right.length_squared() < 1e-6:
+		right = Vector3.RIGHT
+	right = right.normalized()
+	var up := b.y.normalized()
+	var left_shoulder := global_position + b * Vector3(-0.42, 0.92 + bob_y, 0.08)
+	var right_shoulder := global_position + b * Vector3(0.42, 0.92 + bob_y, 0.08)
 	var left_punch_amt := clampf(-_left_punch_z / 0.19, 0.0, 1.0)
 	var right_punch_amt := clampf(-_right_punch_z / 0.19, 0.0, 1.0)
-	_update_arm_joint_chain(_tp_left_anchor, "LeftArmMesh", -1.0, left_punch_amt)
-	_update_arm_joint_chain(_tp_right_anchor, "RightArmMesh", 1.0, right_punch_amt)
-
-func _update_arm_joint_chain(anchor: Node3D, mesh_name: String, side: float, punch_amt: float) -> void:
-	if anchor == null:
-		return
-	var upper := anchor.get_node_or_null(mesh_name) as CSGCylinder3D
-	if upper == null:
-		return
-	var elbow := upper.get_node_or_null("%sElbow" % mesh_name) as Node3D
-	if elbow == null:
-		return
-	var forearm := elbow.get_node_or_null("%sForearm" % mesh_name) as CSGCylinder3D
-	if forearm == null:
-		return
-	# Walking bend: subtle rhythm. Punch bend: stronger forward snap.
-	var walk_wave := sin(_tp_bob_time + (0.7 * side)) * _tp_bob_weight
-	var elbow_pitch := 8.0 + walk_wave * 6.0 + punch_amt * 28.0
-	var elbow_roll := side * (8.0 + walk_wave * 3.0 - punch_amt * 2.0)
-	elbow.rotation_degrees = Vector3(elbow_pitch, 0.0, elbow_roll)
-	var forearm_pitch := 4.0 + walk_wave * 5.0 + punch_amt * 24.0
-	var forearm_roll := side * (4.0 + walk_wave * 2.0)
-	forearm.rotation_degrees = Vector3(forearm_pitch, 0.0, forearm_roll)
+	var left_hand := left_shoulder + fwd * (0.34 + left_punch_amt * 0.28) + right * -0.18 + up * -0.19
+	var right_hand := right_shoulder + fwd * (0.34 + right_punch_amt * 0.28) + right * 0.18 + up * -0.19
+	var left_elbow := _arm_elbow_target(left_shoulder, left_hand, -1.0)
+	var right_elbow := _arm_elbow_target(right_shoulder, right_hand, 1.0)
+	_stretch_arm_between(_push_arm_l, left_shoulder, left_elbow)
+	_stretch_arm_between(_push_forearm_l, left_elbow, left_hand)
+	_stretch_arm_between(_push_arm_r, right_shoulder, right_elbow)
+	_stretch_arm_between(_push_forearm_r, right_elbow, right_hand)
 
 func _hands_empty_for_punch() -> bool:
 	# Gameplay truth: we only have one physical held item, so “hands empty” == no held item.
@@ -550,7 +459,8 @@ func _attach_to_cart(cart: RigidBody3D) -> void:
 	cart.freeze = false
 	cart.sleeping = false
 	cart.can_sleep = false
-	_create_push_arms()
+	if _push_arm_l == null or _push_arm_r == null or _push_forearm_l == null or _push_forearm_r == null:
+		_create_push_arms()
 
 func _new_push_arm_mesh(arm_name: String) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
@@ -700,7 +610,6 @@ func _apply_hitch_forces(delta: float) -> void:
 	)
 
 func _detach_from_cart() -> void:
-	_destroy_push_arms()
 	var cart := current_cart
 	if cart != null:
 		cart.can_sleep = true
@@ -714,6 +623,7 @@ func _detach_from_cart() -> void:
 
 func _exit_tree() -> void:
 	_detach_from_cart()
+	_destroy_push_arms()
 
 
 func _inventory_menu_panel() -> Panel:
