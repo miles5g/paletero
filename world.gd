@@ -42,18 +42,22 @@ func _make_hand_slot(
 	slot.name = slot_name
 	slot.custom_minimum_size = Vector2(72, 72)
 	slot.size = Vector2(72, 72)
+	slot.clip_contents = true
+	slot.z_index = 20
 	slot.add_theme_stylebox_override("panel", _slot_stylebox())
 	var booth := _PHOTO_BOOTH_SCRIPT.new() as SubViewportContainer
 	booth.name = "Booth"
 	booth.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	booth.z_index = 21
 	booth.anchor_left = 0.0
 	booth.anchor_top = 0.0
 	booth.anchor_right = 1.0
 	booth.anchor_bottom = 1.0
-	booth.offset_left = 6.0
-	booth.offset_top = 16.0
-	booth.offset_right = -6.0
-	booth.offset_bottom = -6.0
+	# Inner frame: centered and fully contained inside white border.
+	booth.offset_left = 8.0
+	booth.offset_top = 14.0
+	booth.offset_right = -8.0
+	booth.offset_bottom = -8.0
 	booth.modulate = Color(1.0, 1.0, 1.0, 0.92)
 	var empty_mark := Label.new()
 	empty_mark.name = "EmptyMark"
@@ -361,6 +365,7 @@ func _ready() -> void:
 	var hand_slots := Control.new()
 	hand_slots.name = "HandSlots"
 	hand_slots.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hand_slots.z_index = 40
 	hand_slots.anchor_left = 0.0
 	hand_slots.anchor_right = 0.0
 	hand_slots.anchor_top = 1.0

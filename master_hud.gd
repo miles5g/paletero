@@ -102,6 +102,7 @@ func _ready() -> void:
 			booth_ctrl.offset_bottom = -3.0
 			detail_preview_window.add_child(booth_ctrl)
 	if _detail_icon != null:
+		_detail_icon.texture = null
 		_detail_icon.visible = false
 	_detail_name = get_node("OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/NameLabel") as Label
 	_detail_rarity = get_node("OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/RarityLabel") as RichTextLabel
@@ -1119,6 +1120,8 @@ func _select_index(idx: int) -> void:
 
 	if _detail_booth != null and _detail_booth.has_method("set_item_resource"):
 		_detail_booth.call("set_item_resource", entry)
+		if _detail_icon != null:
+			_detail_icon.visible = false
 	elif entry.icon != null:
 		_detail_icon.texture = entry.icon
 		_detail_icon.visible = true
@@ -1146,6 +1149,8 @@ func _clear_detail_panel() -> void:
 	_detail_description.add_theme_color_override("font_color", Color.WHITE)
 	if _detail_booth != null and _detail_booth.has_method("set_item_resource"):
 		_detail_booth.call("set_item_resource", null)
+		if _detail_icon != null:
+			_detail_icon.visible = false
 	else:
 		_detail_icon.texture = _get_placeholder_preview_texture()
 		_detail_icon.visible = true

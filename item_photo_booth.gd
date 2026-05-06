@@ -20,6 +20,7 @@ func _ready() -> void:
 
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_setup_viewport_world()
+	stretch = true
 
 
 func _process(delta: float) -> void:
@@ -51,10 +52,20 @@ func set_item_resource(item: ItemResource) -> void:
 func _center_current_mesh() -> void:
 	if _current_item_mesh == null or not is_instance_valid(_current_item_mesh):
 		return
+	# First center raw mesh origin.
 	var aabb := _current_item_mesh.get_aabb()
 	var center_local := aabb.position + aabb.size * 0.5
-	# Normalize all mesh origins so the icon is centered in the booth.
 	_current_item_mesh.position = -center_local
+	# Then normalize scale to fit viewport consistently.
+	var aabb_fit := _current_item_mesh.get_aabb()
+	var max_dim := maxf(aabb_fit.size.x, maxf(aabb_fit.size.y, aabb_fit.size.z))
+	if max_dim > 0.001:
+		var fit_scale := 0.72 / max_dim
+		_current_item_mesh.scale = Vector3.ONE * fit_scale
+	# Recenter after scaling so model remains exactly centered.
+	var aabb_scaled := _current_item_mesh.get_aabb()
+	var center_scaled := aabb_scaled.position + aabb_scaled.size * 0.5
+	_current_item_mesh.position = -center_scaled
 
 
 func _setup_viewport_world() -> void:
