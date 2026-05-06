@@ -685,7 +685,7 @@ func _spawn_dropped_item(item_name: String, item: ItemResource) -> void:
 	var scene := get_tree().current_scene
 	if scene == null:
 		return
-	var player := scene.get_node_or_null("Player") as Node3D
+	var player := scene.get_node_or_null("Player") as CharacterBody3D
 	if player == null:
 		return
 	var body: PhysicalItem = _PHYSICAL_ITEM_SCENE.instantiate() as PhysicalItem
@@ -695,7 +695,42 @@ func _spawn_dropped_item(item_name: String, item: ItemResource) -> void:
 	if item != null:
 		body.set_item_resource(item)
 	scene.add_child(body)
-	body.global_position = player.global_position + Vector3(0, 0.8, 0)
+	var up := player.global_transform.basis.y.normalized()
+	var fwd := -player.global_transform.basis.z
+	fwd.y = 0.0
+	if fwd.length_squared() < 1e-6:
+		fwd = Vector3.FORWARD
+	fwd = fwd.normalized()
+	var right := player.global_transform.basis.x
+	right.y = 0.0
+	if right.length_squared() < 1e-6:
+		right = Vector3.RIGHT
+	right = right.normalized()
+	var half_capsule_height := 0.9
+	var shape_node := player.get_node_or_null("CollisionShape3D") as CollisionShape3D
+	if shape_node != null and shape_node.shape is CapsuleShape3D:
+		var shape := shape_node.shape as CapsuleShape3D
+		half_capsule_height = shape.height * 0.5
+	var head_top := player.global_position + up * (half_capsule_height + 0.25)
+	if shape_node != null:
+		head_top = shape_node.global_position + up * (half_capsule_height + 0.25)
+	var side_sign := -1.0 if randf() < 0.5 else 1.0
+	var lateral := (right * side_sign + fwd * randf_range(0.35, 0.75)).normalized()
+	var side_offset := right * side_sign * randf_range(0.44, 0.72)
+	var forward_offset := fwd * randf_range(0.72, 1.02)
+	var vertical_offset := up * randf_range(0.35, 0.52)
+	body.global_position = head_top + side_offset + forward_offset + vertical_offset
+	var tilt_x := deg_to_rad(randf_range(25.0, 40.0))
+	var tilt_z := deg_to_rad(randf_range(16.0, 30.0) * side_sign)
+	body.global_basis = Basis.from_euler(Vector3(tilt_x, 0.0, tilt_z))
+	body.add_collision_exception_with(player)
+	var release_timer := get_tree().create_timer(0.32)
+	release_timer.timeout.connect(func() -> void:
+		if is_instance_valid(body):
+			body.remove_collision_exception_with(player)
+	)
+	body.apply_central_impulse(lateral * randf_range(1.35, 2.0) + up * 0.08)
+	body.apply_torque_impulse(Vector3(randf_range(0.85, 1.5), 0.0, randf_range(-1.5, -0.85) * side_sign))
 
 
 func _on_trash_pressed() -> void:

@@ -203,10 +203,11 @@ func _drop_held_item() -> void:
 	if _held_item == null or not is_instance_valid(_held_item):
 		_held_item = null
 		return
-	_held_item.freeze = false
-	_held_item.sleeping = false
-	_held_item.collision_layer = _held_item_prev_layer
-	_held_item.collision_mask = _held_item_prev_mask
+	var dropped_item: PhysicalItem = _held_item
+	dropped_item.freeze = false
+	dropped_item.sleeping = false
+	dropped_item.collision_layer = _held_item_prev_layer
+	dropped_item.collision_mask = _held_item_prev_mask
 	var fwd := -global_transform.basis.z
 	fwd.y = 0.0
 	if fwd.length_squared() < 1e-6:
@@ -222,10 +223,31 @@ func _drop_held_item() -> void:
 	var side_push := right * side_sign * randf_range(0.65, 1.05)
 	var fwd_push := fwd * randf_range(0.2, 0.55)
 	var lateral := (side_push + fwd_push).normalized()
-	var spawn_offset := lateral * randf_range(0.12, 0.28)
-	_held_item.global_position = global_position + Vector3.UP * 2.05 + spawn_offset
-	_held_item.apply_central_impulse(lateral * randf_range(0.75, 1.25) + Vector3.UP * 0.02)
-	_held_item.apply_torque_impulse(Vector3(randf_range(0.35, 0.95), 0.0, randf_range(-0.95, -0.35) * side_sign))
+	# Use capsule top in world-space so drop height is correct even if origin/offsets differ.
+	var up := global_transform.basis.y.normalized()
+	var half_capsule_height := _stand_shape_height * 0.5
+	if _capsule_shape != null:
+		half_capsule_height = _capsule_shape.height * 0.5
+	var head_top := global_position + up * (half_capsule_height + 0.25)
+	if _collision_shape != null:
+		head_top = _collision_shape.global_position + up * (half_capsule_height + 0.25)
+	var side_offset := right * side_sign * randf_range(0.42, 0.68)
+	var forward_clear := fwd * randf_range(0.66, 0.96)
+	var vertical_clear := up * randf_range(0.32, 0.48)
+	dropped_item.global_position = head_top + side_offset + forward_clear + vertical_clear
+	# Start tilted so a cube corner catches first instead of landing flat on the player's head.
+	var tilt_x := deg_to_rad(randf_range(28.0, 42.0))
+	var tilt_z := deg_to_rad(randf_range(18.0, 32.0) * side_sign)
+	dropped_item.global_basis = Basis.from_euler(Vector3(tilt_x, 0.0, tilt_z))
+	# Briefly ignore the player collider so the item cannot perch on the head.
+	dropped_item.add_collision_exception_with(self)
+	var release_timer := get_tree().create_timer(0.28)
+	release_timer.timeout.connect(func() -> void:
+		if is_instance_valid(dropped_item):
+			dropped_item.remove_collision_exception_with(self)
+	)
+	dropped_item.apply_central_impulse(lateral * randf_range(1.35, 1.95) + up * 0.06)
+	dropped_item.apply_torque_impulse(Vector3(randf_range(0.85, 1.45), 0.0, randf_range(-1.45, -0.85) * side_sign))
 	_held_item = null
 
 
