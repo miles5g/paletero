@@ -32,6 +32,7 @@ const ROW_SELECTED_COLOR := Color(1.0, 0.98, 0.82)
 const ROW_SELECTED_ALPHA := 0.62
 const ROW_SELECTED_ALPHA_LO := 0.28
 const _PHYSICAL_ITEM_SCENE: PackedScene = preload("res://PhysicalItem.tscn")
+const _PHOTO_BOOTH_SCRIPT: Script = preload("res://item_photo_booth.gd")
 
 var _sort_column: SortColumn = SortColumn.NAME
 var _sort_ascending: bool = true
@@ -41,6 +42,7 @@ var _item_list: VBoxContainer
 var _total_money_label: Label
 var _total_weight_label: Label
 var _detail_icon: TextureRect
+var _detail_booth: Node = null
 var _detail_name: Label
 var _detail_rarity: RichTextLabel
 var _detail_category: Label
@@ -82,6 +84,25 @@ func _ready() -> void:
 	_detail_icon = get_node(
 		"OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/ItemPreviewWindow/ItemPreviewImage"
 	) as TextureRect
+	var detail_preview_window := get_node_or_null(
+		"OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/ItemPreviewWindow"
+	) as Control
+	if detail_preview_window != null:
+		_detail_booth = _PHOTO_BOOTH_SCRIPT.new()
+		if _detail_booth is Control:
+			var booth_ctrl := _detail_booth as Control
+			booth_ctrl.name = "ItemPhotoBooth"
+			booth_ctrl.anchor_left = 0.0
+			booth_ctrl.anchor_top = 0.0
+			booth_ctrl.anchor_right = 1.0
+			booth_ctrl.anchor_bottom = 1.0
+			booth_ctrl.offset_left = 3.0
+			booth_ctrl.offset_top = 3.0
+			booth_ctrl.offset_right = -3.0
+			booth_ctrl.offset_bottom = -3.0
+			detail_preview_window.add_child(booth_ctrl)
+	if _detail_icon != null:
+		_detail_icon.visible = false
 	_detail_name = get_node("OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/NameLabel") as Label
 	_detail_rarity = get_node("OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/RarityLabel") as RichTextLabel
 	_detail_category = get_node(
@@ -1096,7 +1117,9 @@ func _select_index(idx: int) -> void:
 	_detail_description.text = entry.description
 	_detail_description.add_theme_color_override("font_color", Color.WHITE)
 
-	if entry.icon != null:
+	if _detail_booth != null and _detail_booth.has_method("set_item_resource"):
+		_detail_booth.call("set_item_resource", entry)
+	elif entry.icon != null:
 		_detail_icon.texture = entry.icon
 		_detail_icon.visible = true
 	else:
@@ -1121,8 +1144,11 @@ func _clear_detail_panel() -> void:
 	_detail_value.add_theme_color_override("font_color", Color.WHITE)
 	_detail_description.text = ""
 	_detail_description.add_theme_color_override("font_color", Color.WHITE)
-	_detail_icon.texture = _get_placeholder_preview_texture()
-	_detail_icon.visible = true
+	if _detail_booth != null and _detail_booth.has_method("set_item_resource"):
+		_detail_booth.call("set_item_resource", null)
+	else:
+		_detail_icon.texture = _get_placeholder_preview_texture()
+		_detail_icon.visible = true
 	_set_action_list_visible(false)
 
 

@@ -2,6 +2,8 @@ extends Node3D
 
 ## PS2-era floor read: tiny albedo so pixels fight the mesh, not crisp HD tiling.
 const FLOOR_ALBEDO_TEXTURE_RES: int = 256
+const _PHOTO_BOOTH_SCRIPT: Script = preload("res://item_photo_booth.gd")
+const _PHOTO_BOOTH_VISUAL_LAYER: int = 2
 
 var _scanline_overlay: ColorRect = null
 
@@ -34,7 +36,6 @@ func _make_hand_slot(
 	slot_name: String,
 	hand_mark: String,
 	mark_on_left: bool,
-	placeholder_tex: Texture2D,
 	font: Font
 ) -> Panel:
 	var slot := Panel.new()
@@ -42,21 +43,18 @@ func _make_hand_slot(
 	slot.custom_minimum_size = Vector2(72, 72)
 	slot.size = Vector2(72, 72)
 	slot.add_theme_stylebox_override("panel", _slot_stylebox())
-	var icon := TextureRect.new()
-	icon.name = "Icon"
-	icon.texture = placeholder_tex
-	icon.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
-	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	icon.anchor_left = 0.0
-	icon.anchor_top = 0.0
-	icon.anchor_right = 1.0
-	icon.anchor_bottom = 1.0
-	icon.offset_left = 10.0
-	icon.offset_top = 16.0
-	icon.offset_right = -10.0
-	icon.offset_bottom = -12.0
-	icon.modulate = Color(1.0, 1.0, 1.0, 0.2)
+	var booth := _PHOTO_BOOTH_SCRIPT.new() as SubViewportContainer
+	booth.name = "Booth"
+	booth.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	booth.anchor_left = 0.0
+	booth.anchor_top = 0.0
+	booth.anchor_right = 1.0
+	booth.anchor_bottom = 1.0
+	booth.offset_left = 6.0
+	booth.offset_top = 16.0
+	booth.offset_right = -6.0
+	booth.offset_bottom = -6.0
+	booth.modulate = Color(1.0, 1.0, 1.0, 0.92)
 	var empty_mark := Label.new()
 	empty_mark.name = "EmptyMark"
 	empty_mark.text = "EMPTY"
@@ -93,7 +91,7 @@ func _make_hand_slot(
 		mark.offset_left = 53.0
 	mark.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	mark.vertical_alignment = VERTICAL_ALIGNMENT_TOP
-	slot.add_child(icon)
+	slot.add_child(booth)
 	slot.add_child(empty_mark)
 	slot.add_child(mark)
 	return slot
@@ -372,9 +370,8 @@ func _ready() -> void:
 	hand_slots.offset_right = 210.0
 	hand_slots.offset_bottom = -18.0
 	var term_hand_font := _make_terminal_font()
-	var slot_placeholder := _make_dim_slot_placeholder()
-	var left_slot := _make_hand_slot("LeftHandSlot", "L", false, slot_placeholder, term_hand_font)
-	var right_slot := _make_hand_slot("RightHandSlot", "R", true, slot_placeholder, term_hand_font)
+	var left_slot := _make_hand_slot("LeftHandSlot", "L", false, term_hand_font)
+	var right_slot := _make_hand_slot("RightHandSlot", "R", true, term_hand_font)
 	# Keep a clear gap so 2px borders never touch/overlap.
 	left_slot.position = Vector2(8.0, 16.0)
 	right_slot.position = Vector2(88.0, 16.0)
@@ -517,6 +514,8 @@ func _spawn_player() -> void:
 	var cam = Camera3D.new()
 	cam.position = Vector3(0, 2.5, 4) # Up and behind
 	cam.rotation_degrees = Vector3(-20, 0, 0) # Tilted down
+	# Visual firewall: gameplay camera ignores booth-only layer.
+	cam.cull_mask = cam.cull_mask & ~(1 << (_PHOTO_BOOTH_VISUAL_LAYER - 1))
 	
 	player.add_child(p_mesh)
 	player.add_child(p_col)

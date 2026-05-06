@@ -103,6 +103,7 @@ func _stock_initial_inventory() -> void:
 	lime.description = "Tart lime frozen fruit bar."
 	lime.rarity = ItemResource.Rarity.GREEN
 	lime.category = ItemResource.Category.FOOD
+	lime.hand_model = ItemResource.HandModel.SPHERE
 	add_item_to_inventory(lime)
 
 	var ice := ItemResource.new()
@@ -113,6 +114,7 @@ func _stock_initial_inventory() -> void:
 	ice.description = "Keeps the cart cold. Heavy but necessary."
 	ice.rarity = ItemResource.Rarity.BLUE
 	ice.category = ItemResource.Category.UTILITY
+	ice.hand_model = ItemResource.HandModel.CUBE
 	add_item_to_inventory(ice)
 
 	var recipe := ItemResource.new()
@@ -123,6 +125,7 @@ func _stock_initial_inventory() -> void:
 	recipe.description = "A handwritten note with the perfect flavor ratios. Priceless."
 	recipe.rarity = ItemResource.Rarity.GOLD
 	recipe.category = ItemResource.Category.UTILITY
+	recipe.hand_model = ItemResource.HandModel.SCROLL
 	add_item_to_inventory(recipe)
 
 	var cooler := ItemResource.new()
@@ -133,6 +136,7 @@ func _stock_initial_inventory() -> void:
 	cooler.description = "A heavy-duty compressor. Makes the cart significantly heavier."
 	cooler.rarity = ItemResource.Rarity.GOLD
 	cooler.category = ItemResource.Category.UTILITY
+	cooler.hand_model = ItemResource.HandModel.CUBE
 	add_item_to_inventory(cooler)
 
 

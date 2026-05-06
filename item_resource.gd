@@ -15,6 +15,15 @@ enum Category {
 	CLOTHING,
 }
 
+enum HandModel {
+	AUTO,
+	CUBE,
+	SPHERE,
+	CAPSULE,
+	CYLINDER,
+	SCROLL,
+}
+
 @export var item_name: String = ""
 @export var quantity: int = 1
 @export var weight_lbs: float = 0.0
@@ -22,4 +31,5 @@ enum Category {
 @export var description: String = ""
 @export var rarity: Rarity = Rarity.GREEN
 @export var category: Category = Category.UTILITY
+@export var hand_model: HandModel = HandModel.AUTO
 @export var icon: Texture2D

@@ -15,3 +15,10 @@
 3. ARCHITECTURE:
 - Keep scripts modular. No monolithic scripts.
 - Rely on Godot's built-in physics engine (RigidBody3D) rather than manual kinematic math for object interactions.
+
+4. MANDATE: THE SELF-CORRECTION LOOP
+- Autonomous Verification: Before finishing any task, internally review code for logic errors, broken references, and syntax bugs. Do not return "Finished" until the solution is verified against existing project architecture.
+- Dependency Check: Every script change (Player, Cart, HUD, etc.) must be checked for regressions across HUD, hand system, and physics handshake. If a regression is found, fix it immediately.
+- Terminal Proof: For logic-heavy tasks (mass calculations, item transfers, inventory math), simulate logic steps and verify expected outcomes before finalizing.
+- No Hallucinated Paths: Never reference files/assets/nodes that do not exist in the current project. If a required asset is missing, use code-generated placeholder architecture (viewport/gradient placeholders) instead of failing.
+- Error Logging: If an error occurs during code generation, do not skip it. Explain the error and provide a concrete fix in the next iteration.

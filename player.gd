@@ -269,9 +269,21 @@ func _refresh_hand_slot_hud() -> void:
 	var w := get_parent()
 	if w == null:
 		return
+	var left_booth := w.get_node_or_null("HUD/HandSlots/LeftHandSlot/Booth") as Node
+	if left_booth != null and left_booth.has_method("set_item_resource"):
+		var left_res: ItemResource = null
+		if _left_hand_item != null and is_instance_valid(_left_hand_item):
+			left_res = _left_hand_item.item_resource
+		left_booth.call("set_item_resource", left_res)
 	var left_empty := w.get_node_or_null("HUD/HandSlots/LeftHandSlot/EmptyMark") as Label
 	if left_empty != null:
 		left_empty.visible = not (_left_hand_item != null and is_instance_valid(_left_hand_item))
+	var right_booth := w.get_node_or_null("HUD/HandSlots/RightHandSlot/Booth") as Node
+	if right_booth != null and right_booth.has_method("set_item_resource"):
+		var right_res: ItemResource = null
+		if _right_hand_item != null and is_instance_valid(_right_hand_item):
+			right_res = _right_hand_item.item_resource
+		right_booth.call("set_item_resource", right_res)
 	var right_empty := w.get_node_or_null("HUD/HandSlots/RightHandSlot/EmptyMark") as Label
 	if right_empty != null:
 		right_empty.visible = not (_right_hand_item != null and is_instance_valid(_right_hand_item))
