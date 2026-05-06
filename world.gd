@@ -82,6 +82,32 @@ func _add_street_box(parent: Node3D, p_name: String, size: Vector3, center_pos: 
 	parent.add_child(body)
 
 
+func _add_street_ramp(
+	parent: Node3D,
+	p_name: String,
+	size: Vector3,
+	center_pos: Vector3,
+	rot_deg: Vector3,
+	mat: Material
+) -> void:
+	var body := StaticBody3D.new()
+	body.name = p_name
+	var mi := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = size
+	mi.mesh = box
+	mi.material_override = mat
+	var col := CollisionShape3D.new()
+	var sh := BoxShape3D.new()
+	sh.size = size
+	col.shape = sh
+	body.add_child(mi)
+	body.add_child(col)
+	body.position = center_pos
+	body.rotation_degrees = rot_deg
+	parent.add_child(body)
+
+
 ## Long strip along Z: sidewalks + curbs + wet asphalt lane (player/cart stay near center).
 func _build_street_layout(root: Node3D) -> void:
 	var street_root := Node3D.new()
@@ -141,6 +167,15 @@ func _build_street_layout(root: Node3D) -> void:
 		Vector3(sidewalk_w, slab_h, street_len),
 		Vector3(walk_center_x, slab_y, z0),
 		concrete
+	)
+	# Gentle kick ramp in-lane, close to player spawn so it’s easy to see and hit.
+	_add_street_ramp(
+		street_root,
+		"KickRamp",
+		Vector3(3.6, 0.6, 5.0),
+		Vector3(0.0, 0.0, -14.0),
+		Vector3(-18.0, 180.0, 0.0),
+		asphalt
 	)
 
 
