@@ -4,10 +4,13 @@ extends Node3D
 const FLOOR_ALBEDO_TEXTURE_RES: int = 256
 const _PHOTO_BOOTH_SCRIPT: Script = preload("res://item_photo_booth.gd")
 const _PHOTO_BOOTH_VISUAL_LAYER: int = 2
+const _MAP_STRUCTURAL_LAYER: int = 1
 const _PHYSICAL_ITEM_SCENE: PackedScene = preload("res://PhysicalItem.tscn")
 const _CELESTIAL_CYCLE_SCRIPT: Script = preload("res://celestial_cycle.gd")
 
 var _scanline_overlay: ColorRect = null
+var _compass_bar_label: Label = null
+var _compass_caret_label: Label = null
 
 
 func _slot_stylebox() -> StyleBoxFlat:
@@ -169,6 +172,7 @@ func _add_street_box(parent: Node3D, p_name: String, size: Vector3, center_pos: 
 	box.size = size
 	mi.mesh = box
 	mi.material_override = mat
+	mi.layers = 1 << (_MAP_STRUCTURAL_LAYER - 1)
 	var col := CollisionShape3D.new()
 	var sh := BoxShape3D.new()
 	sh.size = size
@@ -194,6 +198,7 @@ func _add_street_ramp(
 	box.size = size
 	mi.mesh = box
 	mi.material_override = mat
+	mi.layers = 1 << (_MAP_STRUCTURAL_LAYER - 1)
 	var col := CollisionShape3D.new()
 	var sh := BoxShape3D.new()
 	sh.size = size
@@ -315,6 +320,61 @@ func _update_scanline_display_height() -> void:
 		sm.set_shader_parameter("display_height", get_viewport().get_visible_rect().size.y)
 
 
+func _heading_degrees_from_player(player: CharacterBody3D) -> float:
+	if player == null:
+		return 0.0
+	var cam := player.get_node_or_null("Camera3D") as Camera3D
+	var fwd := -player.global_transform.basis.z
+	if cam != null:
+		fwd = -cam.global_transform.basis.z
+	fwd.y = 0.0
+	if fwd.length_squared() < 1e-6:
+		return 0.0
+	fwd = fwd.normalized()
+	# 0 deg = North (-Z), clockwise positive.
+	return fposmod(rad_to_deg(atan2(fwd.x, -fwd.z)), 360.0)
+
+
+func _compass_bar_text(heading_deg: float) -> String:
+	var width := 41
+	var center := width / 2
+	var chars := PackedStringArray()
+	for _i in range(width):
+		chars.append(" ")
+	# 90 degrees span across the bar; center is camera forward.
+	for dir_idx in range(8):
+		var dir_deg := float(dir_idx) * 45.0
+		var rel := fposmod(dir_deg - heading_deg + 180.0, 360.0) - 180.0
+		if absf(rel) > 95.0:
+			continue
+		var x := center + int(round((rel / 90.0) * float(center - 1)))
+		var label: String = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][dir_idx]
+		if label.length() == 1:
+			if x >= 0 and x < width:
+				chars[x] = label
+		else:
+			var left := x - 1
+			if left >= 0 and left < width:
+				chars[left] = label.substr(0, 1)
+			if left + 1 >= 0 and left + 1 < width:
+				chars[left + 1] = label.substr(1, 1)
+	var line := ""
+	for i in range(width):
+		line += chars[i]
+	return line
+
+
+func _update_compass_hud() -> void:
+	if _compass_bar_label == null:
+		return
+	var player := get_node_or_null("Player") as CharacterBody3D
+	if player == null:
+		return
+	var heading_deg := _heading_degrees_from_player(player)
+	if _compass_bar_label != null:
+		_compass_bar_label.text = _compass_bar_text(heading_deg)
+
+
 func set_grab_prompts_visible(v: bool) -> void:
 	var box := get_node_or_null("HUD/InteractionPrompts") as Control
 	if box == null:
@@ -333,8 +393,11 @@ func set_interaction_prompt_text(msg: String) -> void:
 
 
 func _ready() -> void:
+	set_process(true)
 	var hud := CanvasLayer.new()
 	hud.name = "HUD"
+	# Keep gameplay/inventory UI above auxiliary overlays like the sun-dial wait HUD.
+	hud.layer = 20
 
 	var prompt_box := VBoxContainer.new()
 	prompt_box.name = "InteractionPrompts"
@@ -344,8 +407,9 @@ func _ready() -> void:
 	prompt_box.anchor_right = 1.0
 	prompt_box.anchor_top = 1.0
 	prompt_box.anchor_bottom = 1.0
-	prompt_box.offset_top = -72.0
-	prompt_box.offset_bottom = -12.0
+	# Keep interaction prompts above bottom compass strip.
+	prompt_box.offset_top = -118.0
+	prompt_box.offset_bottom = -58.0
 	prompt_box.alignment = BoxContainer.ALIGNMENT_CENTER
 
 	var inventory_prompt := Label.new()
@@ -387,6 +451,10 @@ func _ready() -> void:
 	hud.add_child(hand_slots)
 
 	var inv_menu: Node = load("res://MasterHUD.tscn").instantiate()
+	if inv_menu is Control:
+		var inv_ctrl := inv_menu as Control
+		# Hand slots use z_index 40; keep inventory popup definitively above them.
+		inv_ctrl.z_index = 120
 	hud.add_child(inv_menu)
 	var term_inv_font := _make_terminal_font()
 	_apply_terminal_theme_to_node(inv_menu, term_inv_font, 13)
@@ -408,6 +476,45 @@ func _ready() -> void:
 
 	var term_ui_font := _make_terminal_font()
 	_apply_terminal_theme_to_node(prompt_box, term_ui_font, 14)
+
+	var compass_bar := Label.new()
+	compass_bar.name = "CompassBar"
+	compass_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	compass_bar.anchor_left = 0.5
+	compass_bar.anchor_right = 0.5
+	compass_bar.anchor_top = 1.0
+	compass_bar.anchor_bottom = 1.0
+	compass_bar.offset_left = -170.0
+	compass_bar.offset_top = -36.0
+	compass_bar.offset_right = 170.0
+	compass_bar.offset_bottom = -8.0
+	compass_bar.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	compass_bar.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	compass_bar.add_theme_font_override("font", term_ui_font)
+	compass_bar.add_theme_font_size_override("font_size", 12)
+	compass_bar.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 0.95))
+	hud.add_child(compass_bar)
+	_compass_bar_label = compass_bar
+
+	var compass_caret := Label.new()
+	compass_caret.name = "CompassCaret"
+	compass_caret.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	compass_caret.anchor_left = 0.5
+	compass_caret.anchor_right = 0.5
+	compass_caret.anchor_top = 1.0
+	compass_caret.anchor_bottom = 1.0
+	compass_caret.offset_left = -8.0
+	compass_caret.offset_top = -24.0
+	compass_caret.offset_right = 8.0
+	compass_caret.offset_bottom = -6.0
+	compass_caret.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	compass_caret.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	compass_caret.text = "^"
+	compass_caret.add_theme_font_override("font", term_ui_font)
+	compass_caret.add_theme_font_size_override("font_size", 12)
+	compass_caret.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 0.95))
+	hud.add_child(compass_caret)
+	_compass_caret_label = compass_caret
 
 	add_child(hud)
 
@@ -465,6 +572,8 @@ func _ready() -> void:
 	cart_mesh.mesh = BoxMesh.new()
 	cart_mesh.mesh.size = Vector3(1, 1, 1.5)
 	cart_mesh.position.y = 0.16
+	# Map camera excludes actor layer; cart is represented by 2D marker overlay.
+	cart_mesh.layers = 1 << (3 - 1)
 	
 	var cart_col = CollisionShape3D.new()
 	cart_col.shape = BoxShape3D.new()
@@ -495,6 +604,10 @@ func _ready() -> void:
 	var player := _spawn_player()
 	_spawn_initial_floor_items(player)
 
+
+func _process(_delta: float) -> void:
+	_update_compass_hud()
+
 func _spawn_player() -> CharacterBody3D:
 	var player = CharacterBody3D.new()
 	player.name = "Player"
@@ -507,6 +620,8 @@ func _spawn_player() -> CharacterBody3D:
 	
 	var p_mesh = MeshInstance3D.new()
 	p_mesh.mesh = CapsuleMesh.new()
+	# Keep player hidden from structural top-down map render.
+	p_mesh.layers = 1 << (3 - 1)
 	
 	var p_col = CollisionShape3D.new()
 	p_col.shape = CapsuleShape3D.new()

@@ -68,6 +68,7 @@ var _cam_jitter_tw: Tween = null
 var _swap_hands_tw: Tween = null
 var _player_transparency_target: float = 0.0
 var _wait_t_prev_down: bool = false
+var inventory_list: Array[ItemResource] = []
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -127,7 +128,7 @@ func _physics_process(delta: float) -> void:
 	if t_down and not _wait_t_prev_down:
 		_request_wait_toggle()
 	_wait_t_prev_down = t_down
-	if Input.is_action_just_pressed("toggle_inventory") and _can_toggle_cart_inventory():
+	if Input.is_action_just_pressed("toggle_inventory"):
 		_toggle_inventory_menu()
 	_update_pickup_target_and_prompt()
 	if Input.is_action_just_pressed("interact"):
@@ -657,6 +658,7 @@ func _new_push_arm_mesh(arm_name: String) -> MeshInstance3D:
 	mat.roughness = 0.9
 	mi.material_override = mat
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	mi.layers = 1 << (3 - 1)
 	return mi
 
 func _create_push_arms() -> void:
@@ -857,7 +859,12 @@ func _toggle_inventory_menu() -> void:
 	if panel.visible:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		var cart := _resolve_cart_for_inventory()
-		if cart != null and panel.has_method("bind_cart"):
+		var inventory_owner_node: Node = self
+		if cart != null:
+			inventory_owner_node = cart
+		if panel.has_method("bind_inventory_owner"):
+			panel.bind_inventory_owner(inventory_owner_node)
+		elif cart != null and panel.has_method("bind_cart"):
 			panel.bind_cart(cart)
 		if panel.has_method("refresh"):
 			panel.refresh()
@@ -872,6 +879,24 @@ func _request_wait_toggle() -> void:
 	var cycle := w.get_node_or_null("CelestialCycle")
 	if cycle != null and cycle.has_method("request_wait_toggle"):
 		cycle.call("request_wait_toggle")
+
+
+func add_item_to_inventory(new_item_resource: ItemResource) -> void:
+	if new_item_resource == null:
+		return
+	for existing in inventory_list:
+		if existing.item_name == new_item_resource.item_name:
+			existing.quantity += new_item_resource.quantity
+			return
+	inventory_list.append(new_item_resource.duplicate(true))
+
+
+func calculate_total_weight() -> float:
+	var total := 0.0
+	for it in inventory_list:
+		if it is ItemResource:
+			total += it.weight_lbs * float(it.quantity)
+	return total
 
 
 func _can_uncrouch_to_stand() -> bool:

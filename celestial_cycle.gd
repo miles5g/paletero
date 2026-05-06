@@ -238,6 +238,7 @@ func _build_debug_hud() -> void:
 		return
 	_debug_layer = CanvasLayer.new()
 	_debug_layer.name = "CelestialClockHUD"
+	_debug_layer.layer = 5
 	add_child(_debug_layer)
 	_backdrop = ColorRect.new()
 	_backdrop.name = "WaitBackdrop"

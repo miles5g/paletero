@@ -33,6 +33,13 @@ const ROW_SELECTED_ALPHA := 0.62
 const ROW_SELECTED_ALPHA_LO := 0.28
 const _PHYSICAL_ITEM_SCENE: PackedScene = preload("res://PhysicalItem.tscn")
 const _PHOTO_BOOTH_SCRIPT: Script = preload("res://item_photo_booth.gd")
+const MAP_VIEWPORT_SIZE: Vector2i = Vector2i(256, 256)
+const MAP_WORLD_MIN_X: float = -14.0
+const MAP_WORLD_MAX_X: float = 14.0
+const MAP_WORLD_MIN_Z: float = -55.0
+const MAP_WORLD_MAX_Z: float = 55.0
+const MAP_ACTOR_LAYER: int = 3
+const MAP_STRUCTURAL_LAYER: int = 1
 
 var _sort_column: SortColumn = SortColumn.NAME
 var _sort_ascending: bool = true
@@ -53,6 +60,7 @@ var _action_list: VBoxContainer
 var _drop_button: Button
 var _trash_button: Button
 var _eat_button: Button
+var _transfer_button: Button = null
 var _btn_manifest: Button
 var _btn_stats: Button
 var _btn_map: Button
@@ -62,7 +70,17 @@ var _stats_page: Control
 var _map_page: Control
 var _active_section: Section = Section.MANIFEST
 
-var _cart: RigidBody3D = null
+var _inventory_owner: Node = null
+var _player_owner: CharacterBody3D = null
+var _cart_owner: RigidBody3D = null
+var _map_view: SubViewportContainer = null
+var _map_viewport: SubViewport = null
+var _map_camera: Camera3D = null
+var _map_overlay: Control = null
+var _map_player_marker: Polygon2D = null
+var _map_cart_marker: Label = null
+var _map_rose_root: Control = null
+var _map_legend_label: Label = null
 var _entries: Array[ItemResource] = []
 var _placeholder_preview_tex: Texture2D = null
 
@@ -71,6 +89,7 @@ var _row_pulse_targets: Dictionary = {}
 
 
 func _ready() -> void:
+	set_process(true)
 	_apply_panel_borders()
 	_item_list = get_node(
 		"OuterMargin/MainContainer/CenterPanel/CenterColumn/CenterList/ItemListVBox"
@@ -130,6 +149,12 @@ func _ready() -> void:
 	_eat_button = get_node(
 		"OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/ActionList/EatButton"
 	) as Button
+	_transfer_button = _action_list.get_node_or_null("TransferButton") as Button
+	if _transfer_button == null and _action_list != null:
+		_transfer_button = Button.new()
+		_transfer_button.name = "TransferButton"
+		_transfer_button.text = "[ TRANSFER ]"
+		_action_list.add_child(_transfer_button)
 	_btn_manifest = get_node("OuterMargin/MainContainer/LeftRailPanel/LeftRail/BtnManifest") as Button
 	_btn_stats = get_node("OuterMargin/MainContainer/LeftRailPanel/LeftRail/BtnStats") as Button
 	_btn_map = get_node("OuterMargin/MainContainer/LeftRailPanel/LeftRail/BtnMap") as Button
@@ -146,6 +171,7 @@ func _ready() -> void:
 func _deferred_after_world_theme() -> void:
 	_style_list_headers()
 	_style_sort_buttons()
+	_style_left_rail_buttons()
 	_connect_sort_buttons()
 	_connect_action_buttons()
 	_connect_nav_buttons()
@@ -160,6 +186,15 @@ func _deferred_after_world_theme() -> void:
 	if _total_weight_label:
 		_total_weight_label.add_theme_font_size_override("font_size", 12)
 		_total_weight_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+
+
+func _style_left_rail_buttons() -> void:
+	for b in [_btn_manifest, _btn_stats, _btn_map]:
+		if b == null:
+			continue
+		# Keep long labels like "PLAYER INVENTORY" inside narrow rail bounds.
+		b.add_theme_font_size_override("font_size", 10)
+		b.alignment = HORIZONTAL_ALIGNMENT_CENTER
 
 
 func _style_list_headers() -> void:
@@ -330,10 +365,210 @@ func _ensure_section_pages() -> void:
 		_stats_page = stats_box
 	_map_page = center_panel.get_node_or_null("MapPage") as Control
 	if _map_page == null:
-		var map_box := _make_empty_section_page("MAP (EMPTY)")
-		map_box.name = "MapPage"
-		center_panel.add_child(map_box)
-		_map_page = map_box
+		var map_panel := Panel.new()
+		map_panel.name = "MapPage"
+		map_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+		map_panel.offset_left = 8.0
+		map_panel.offset_top = 8.0
+		map_panel.offset_right = -8.0
+		map_panel.offset_bottom = -8.0
+		map_panel.visible = false
+		center_panel.add_child(map_panel)
+		_map_page = map_panel
+		_build_map_view(map_panel)
+
+
+func _build_map_view(map_root: Control) -> void:
+	if map_root == null:
+		return
+	_map_view = SubViewportContainer.new()
+	_map_view.name = "MapViewportContainer"
+	_map_view.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_map_view.offset_left = 6.0
+	_map_view.offset_top = 6.0
+	_map_view.offset_right = -6.0
+	_map_view.offset_bottom = -6.0
+	_map_view.stretch = true
+	_map_view.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_map_view.material = _map_terminal_material()
+	map_root.add_child(_map_view)
+
+	_map_viewport = SubViewport.new()
+	_map_viewport.name = "MapViewport"
+	_map_viewport.size = MAP_VIEWPORT_SIZE
+	_map_viewport.disable_3d = false
+	_map_viewport.transparent_bg = false
+	_map_viewport.own_world_3d = false
+	_map_viewport.msaa_3d = Viewport.MSAA_DISABLED
+	_map_view.add_child(_map_viewport)
+
+	_map_camera = Camera3D.new()
+	_map_camera.name = "MapTopCamera"
+	_map_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
+	_map_camera.size = 120.0
+	_map_camera.near = 0.1
+	_map_camera.far = 500.0
+	_map_camera.position = Vector3(0.0, 140.0, 0.0)
+	_map_camera.rotation_degrees = Vector3(-90.0, 0.0, 0.0)
+	# Structural-only pass: render only designated structure layer.
+	_map_camera.cull_mask = 1 << (MAP_STRUCTURAL_LAYER - 1)
+	_map_camera.current = true
+	_map_viewport.add_child(_map_camera)
+
+	var map_light := DirectionalLight3D.new()
+	map_light.name = "MapLight"
+	map_light.light_energy = 2.0
+	map_light.light_color = Color(0.9, 1.0, 0.9)
+	map_light.shadow_enabled = false
+	map_light.rotation_degrees = Vector3(-78.0, 38.0, 0.0)
+	map_light.light_cull_mask = 1 << (MAP_STRUCTURAL_LAYER - 1)
+	_map_viewport.add_child(map_light)
+
+	_map_overlay = Control.new()
+	_map_overlay.name = "MapOverlay"
+	_map_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_map_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	map_root.add_child(_map_overlay)
+
+	_map_player_marker = Polygon2D.new()
+	_map_player_marker.name = "PlayerMarker"
+	# Clear directional arrow: sharp nose + short tail.
+	_map_player_marker.polygon = PackedVector2Array([
+		Vector2(0.0, -12.0),
+		Vector2(8.0, 8.0),
+		Vector2(2.5, 5.0),
+		Vector2(0.0, 12.0),
+		Vector2(-2.5, 5.0),
+		Vector2(-8.0, 8.0),
+	])
+	_map_player_marker.color = Color.WHITE
+	_map_overlay.add_child(_map_player_marker)
+
+	_map_cart_marker = Label.new()
+	_map_cart_marker.name = "CartMarker"
+	_map_cart_marker.text = "■"
+	_map_cart_marker.add_theme_font_size_override("font_size", 13)
+	_map_cart_marker.add_theme_color_override("font_color", Color.WHITE)
+	_map_cart_marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_map_overlay.add_child(_map_cart_marker)
+
+	_map_rose_root = Control.new()
+	_map_rose_root.name = "MapRose"
+	_map_rose_root.anchor_left = 0.0
+	_map_rose_root.anchor_top = 0.0
+	_map_rose_root.anchor_right = 0.0
+	_map_rose_root.anchor_bottom = 0.0
+	_map_rose_root.offset_left = 14.0
+	_map_rose_root.offset_top = 8.0
+	_map_rose_root.offset_right = 126.0
+	_map_rose_root.offset_bottom = 70.0
+	map_root.add_child(_map_rose_root)
+
+	var rose_color := Color(0.82, 1.0, 0.82, 0.95)
+	var rose_center := Vector2(56.0, 28.0)
+	var rose_font_size := 12
+	for entry in [
+		{"txt": "N", "pos": Vector2(rose_center.x - 8.0, rose_center.y - 20.0)},
+		{"txt": "E", "pos": Vector2(rose_center.x + 14.0, rose_center.y - 4.0)},
+		{"txt": "S", "pos": Vector2(rose_center.x - 8.0, rose_center.y + 12.0)},
+		{"txt": "W", "pos": Vector2(rose_center.x - 30.0, rose_center.y - 4.0)},
+		{"txt": "✦", "pos": Vector2(rose_center.x - 8.0, rose_center.y - 4.0)},
+	]:
+		var rose_label := Label.new()
+		rose_label.text = entry["txt"]
+		rose_label.position = entry["pos"]
+		rose_label.size = Vector2(16.0, 16.0)
+		rose_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		rose_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		rose_label.add_theme_font_size_override("font_size", rose_font_size)
+		rose_label.add_theme_color_override("font_color", rose_color)
+		_map_rose_root.add_child(rose_label)
+
+	_map_legend_label = Label.new()
+	_map_legend_label.name = "MapLegendKey"
+	_map_legend_label.anchor_left = 0.0
+	_map_legend_label.anchor_top = 0.0
+	_map_legend_label.anchor_right = 0.0
+	_map_legend_label.anchor_bottom = 0.0
+	_map_legend_label.offset_left = 24.0
+	_map_legend_label.offset_top = 64.0
+	_map_legend_label.offset_right = 104.0
+	_map_legend_label.offset_bottom = 114.0
+	_map_legend_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_map_legend_label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	_map_legend_label.add_theme_font_size_override("font_size", 10)
+	_map_legend_label.add_theme_color_override("font_color", Color(0.82, 1.0, 0.82, 0.95))
+	_map_legend_label.text = "▲ Player\n■ Cart"
+	map_root.add_child(_map_legend_label)
+
+
+func _process(_delta: float) -> void:
+	if _map_page == null or not _map_page.visible:
+		return
+	_resolve_known_owners()
+	_update_map_markers()
+
+
+func _update_map_markers() -> void:
+	if _map_overlay == null or _map_player_marker == null or _map_cart_marker == null:
+		return
+	var map_size := _map_overlay.size
+	if map_size.x <= 1.0 or map_size.y <= 1.0:
+		return
+	if _player_owner != null and is_instance_valid(_player_owner):
+		var p2 := _world_to_map(_player_owner.global_position, map_size)
+		_map_player_marker.position = p2
+		var fwd := _player_compass_forward(_player_owner)
+		_map_player_marker.rotation = _map_heading_rotation(fwd)
+		_map_player_marker.visible = true
+	else:
+		_map_player_marker.visible = false
+	if _cart_owner != null and is_instance_valid(_cart_owner):
+		var c2 := _world_to_map(_cart_owner.global_position, map_size)
+		_map_cart_marker.position = c2 - Vector2(6.0, 8.0)
+		_map_cart_marker.visible = true
+	else:
+		_map_cart_marker.visible = false
+
+
+func _world_to_map(world_pos: Vector3, map_size: Vector2) -> Vector2:
+	var nx := inverse_lerp(MAP_WORLD_MIN_X, MAP_WORLD_MAX_X, world_pos.x)
+	var nz := inverse_lerp(MAP_WORLD_MIN_Z, MAP_WORLD_MAX_Z, world_pos.z)
+	nx = clampf(nx, 0.0, 1.0)
+	nz = clampf(nz, 0.0, 1.0)
+	return Vector2(nx * map_size.x, nz * map_size.y)
+
+
+func _player_compass_forward(player: CharacterBody3D) -> Vector3:
+	if player == null:
+		return Vector3(0.0, 0.0, -1.0)
+	var cam := player.get_node_or_null("Camera3D") as Camera3D
+	var fwd := -player.global_transform.basis.z
+	if cam != null:
+		fwd = -cam.global_transform.basis.z
+	fwd.y = 0.0
+	if fwd.length_squared() < 1e-6:
+		return Vector3(0.0, 0.0, -1.0)
+	return fwd.normalized()
+
+
+func _map_heading_rotation(fwd_world: Vector3) -> float:
+	var fwd := Vector3(fwd_world.x, 0.0, fwd_world.z)
+	if fwd.length_squared() < 1e-6:
+		return 0.0
+	fwd = fwd.normalized()
+	# North-up map: 0 rad points to -Z (up on map), positive rotates clockwise.
+	return atan2(fwd.x, -fwd.z)
+
+
+
+
+func _map_terminal_material() -> ShaderMaterial:
+	var mat := ShaderMaterial.new()
+	var sh := Shader.new()
+	sh.code = "shader_type canvas_item;\n\nvoid fragment() {\n\tvec4 c = texture(TEXTURE, UV);\n\tfloat l = dot(c.rgb, vec3(0.299, 0.587, 0.114));\n\tfloat p = floor(l * 6.0) / 6.0;\n\tvec3 green = vec3(0.0, 1.0, 0.35) * p;\n\tCOLOR = vec4(green, c.a);\n}\n"
+	mat.shader = sh
+	return mat
 
 
 func _connect_nav_buttons() -> void:
@@ -352,6 +587,8 @@ func _connect_nav_buttons() -> void:
 
 
 func _on_manifest_pressed() -> void:
+	if _active_section == Section.MANIFEST:
+		_try_toggle_inventory_owner()
 	_show_section(Section.MANIFEST)
 
 
@@ -431,6 +668,7 @@ func _style_action_buttons_bw() -> void:
 		"OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/ActionList/DropButton",
 		"OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/ActionList/TrashButton",
 		"OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/ActionList/EatButton",
+		"OuterMargin/MainContainer/RightPanel/RightDetail/BottomHalf/DetailVBox/ActionList/TransferButton",
 	]
 	for p in paths:
 		var b := get_node_or_null(p) as Button
@@ -510,6 +748,8 @@ func _connect_action_buttons() -> void:
 		_trash_button.pressed.connect(_on_trash_pressed)
 	if _eat_button and not _eat_button.pressed.is_connected(_on_eat_pressed):
 		_eat_button.pressed.connect(_on_eat_pressed)
+	if _transfer_button and not _transfer_button.pressed.is_connected(_on_transfer_pressed):
+		_transfer_button.pressed.connect(_on_transfer_pressed)
 
 
 func _on_header_sort_gui_input(ev: InputEvent, which: SortColumn) -> void:
@@ -591,7 +831,16 @@ func _apply_panel_borders() -> void:
 
 
 func bind_cart(cart: RigidBody3D) -> void:
-	_cart = cart
+	_inventory_owner = cart
+	_resolve_known_owners()
+	_update_manifest_title()
+	update_total_manifest_weight()
+
+
+func bind_inventory_owner(inventory_owner_node: Node) -> void:
+	_inventory_owner = inventory_owner_node
+	_resolve_known_owners()
+	_update_manifest_title()
 	update_total_manifest_weight()
 
 
@@ -600,8 +849,8 @@ func update_total_manifest_weight() -> void:
 		return
 	var total_w := 0.0
 	var total_money := 0.0
-	if _cart != null:
-		var inv: Variant = _cart.get("inventory_list")
+	if _inventory_owner != null:
+		var inv: Variant = _inventory_owner.get("inventory_list")
 		if inv != null:
 			for it in inv:
 				if it is ItemResource:
@@ -675,6 +924,7 @@ func _fill_item_list_rows() -> void:
 func _set_action_list_visible(v: bool) -> void:
 	if _action_list:
 		_action_list.visible = v
+	_update_transfer_button_state()
 
 
 func _selected_entry() -> ItemResource:
@@ -684,22 +934,22 @@ func _selected_entry() -> ItemResource:
 
 
 func _remove_selected_item_from_cart() -> ItemResource:
-	if _cart == null:
+	if _inventory_owner == null:
 		return null
 	var entry := _selected_entry()
 	if entry == null:
 		return null
-	var inv: Variant = _cart.get("inventory_list")
+	var inv: Variant = _inventory_owner.get("inventory_list")
 	if inv == null:
 		return null
 	var list := inv as Array
 	var idx := list.find(entry)
 	if idx >= 0:
 		list.remove_at(idx)
-	if _cart.has_method("calculate_total_weight"):
-		_cart.calculate_total_weight()
-	if _cart.has_method("update_mass"):
-		_cart.update_mass()
+	if _inventory_owner.has_method("calculate_total_weight"):
+		_inventory_owner.calculate_total_weight()
+	if _inventory_owner.has_method("update_mass"):
+		_inventory_owner.update_mass()
 	return entry
 
 
@@ -778,6 +1028,39 @@ func _on_drop_pressed() -> void:
 	refresh()
 
 
+func _on_transfer_pressed() -> void:
+	var entry := _selected_entry()
+	if entry == null:
+		return
+	var from_owner := _inventory_owner
+	var to_owner := _transfer_target_owner()
+	if from_owner == null or to_owner == null:
+		return
+	var inv: Variant = from_owner.get("inventory_list")
+	if inv == null:
+		return
+	var from_list := inv as Array
+	var idx := from_list.find(entry)
+	if idx < 0:
+		return
+	from_list.remove_at(idx)
+	if to_owner.has_method("add_item_to_inventory"):
+		to_owner.add_item_to_inventory(entry)
+	else:
+		var to_inv: Variant = to_owner.get("inventory_list")
+		if to_inv is Array:
+			(to_inv as Array).append(entry.duplicate(true))
+	if from_owner.has_method("calculate_total_weight"):
+		from_owner.calculate_total_weight()
+	if from_owner.has_method("update_mass"):
+		from_owner.update_mass()
+	if to_owner.has_method("calculate_total_weight"):
+		to_owner.calculate_total_weight()
+	if to_owner.has_method("update_mass"):
+		to_owner.update_mass()
+	refresh()
+
+
 func _on_sort_toggle(which: SortColumn) -> void:
 	if _sort_column == which:
 		_sort_ascending = not _sort_ascending
@@ -814,13 +1097,15 @@ func refresh() -> void:
 	_entries.clear()
 	_clear_detail_panel()
 	_selected_row_index = -1
+	_resolve_known_owners()
+	_update_manifest_title()
 
-	if _cart == null:
+	if _inventory_owner == null:
 		update_total_manifest_weight()
 		_update_sort_button_icons()
 		return
 
-	var inv: Variant = _cart.get("inventory_list")
+	var inv: Variant = _inventory_owner.get("inventory_list")
 	if inv == null:
 		update_total_manifest_weight()
 		_update_sort_button_icons()
@@ -839,6 +1124,79 @@ func refresh() -> void:
 		_select_index(0)
 	else:
 		_set_action_list_visible(false)
+
+
+func _resolve_known_owners() -> void:
+	var scene := get_tree().current_scene
+	if scene == null:
+		return
+	if _player_owner == null or not is_instance_valid(_player_owner):
+		_player_owner = scene.get_node_or_null("Player") as CharacterBody3D
+	if _cart_owner == null or not is_instance_valid(_cart_owner):
+		_cart_owner = scene.get_node_or_null("Cart") as RigidBody3D
+
+
+func _update_manifest_title() -> void:
+	if _btn_manifest == null:
+		return
+	if _inventory_owner != null and _player_owner != null and _inventory_owner == _player_owner:
+		_btn_manifest.text = "PLAYER INVENTORY"
+	else:
+		_btn_manifest.text = "CART INVENTORY"
+
+
+func _transfer_target_owner() -> Node:
+	_resolve_known_owners()
+	if not _is_player_near_cart():
+		return null
+	if _inventory_owner == null:
+		return null
+	if _player_owner != null and _inventory_owner == _player_owner:
+		return _cart_owner
+	if _cart_owner != null and _inventory_owner == _cart_owner:
+		return _player_owner
+	return null
+
+
+func _update_transfer_button_state() -> void:
+	if _transfer_button == null:
+		return
+	if _action_list == null or not _action_list.visible:
+		_transfer_button.visible = false
+		return
+	var target := _transfer_target_owner()
+	var can_transfer := _selected_entry() != null and target != null and is_instance_valid(target)
+	_transfer_button.visible = can_transfer
+	if not can_transfer:
+		return
+	if _player_owner != null and target == _player_owner:
+		_transfer_button.text = "[ TRANSFER TO PLAYER ]"
+	else:
+		_transfer_button.text = "[ TRANSFER TO CART ]"
+
+
+func _is_player_near_cart() -> bool:
+	if _player_owner == null or _cart_owner == null:
+		return false
+	if bool(_player_owner.get("is_pushing")):
+		return true
+	if _cart_owner.has_method("is_player_in_grab_range"):
+		return bool(_cart_owner.call("is_player_in_grab_range", _player_owner))
+	return false
+
+
+func _try_toggle_inventory_owner() -> void:
+	_resolve_known_owners()
+	if _player_owner == null or _cart_owner == null:
+		return
+	if not _is_player_near_cart():
+		return
+	if _inventory_owner == _cart_owner:
+		_inventory_owner = _player_owner
+	else:
+		_inventory_owner = _cart_owner
+	_update_manifest_title()
+	refresh()
 
 
 func _make_inventory_row(entry: ItemResource, row_idx: int) -> Control:
