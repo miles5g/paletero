@@ -42,18 +42,18 @@ const MAP_WAYPOINT_BEAM_HEIGHT: float = 40.0
 const MAP_WAYPOINT_BEAM_RADIUS: float = 0.16
 const MAP_WAYPOINT_BEAM_NODE: NodePath = NodePath("MapWaypointBeam")
 const MAP_WAYPOINT_REACHED_DIST: float = 1.35
-const MAP_WORLD_MIN_X: float = -14.0
-const MAP_WORLD_MAX_X: float = 14.0
-const MAP_WORLD_MIN_Z: float = -55.0
-const MAP_WORLD_MAX_Z: float = 55.0
+const MAP_WORLD_MIN_X: float = -72.0
+const MAP_WORLD_MAX_X: float = 72.0
+const MAP_WORLD_MIN_Z: float = -72.0
+const MAP_WORLD_MAX_Z: float = 72.0
 const MAP_ACTOR_LAYER: int = 3
 const MAP_STRUCTURAL_LAYER: int = 1
-const MAP_STREET_LEN: float = 100.0
-const MAP_STREET_HALF_W: float = 4.0
+const MAP_STREET_LEN: float = 132.0
+const MAP_STREET_HALF_W: float = 6.5
 const MAP_CURB_W: float = 0.22
 const MAP_CURB_H: float = 0.16
-const MAP_SIDEWALK_W: float = 6.0
-const MAP_SLAB_H: float = 0.2
+const MAP_SIDEWALK_W: float = 11.0
+const MAP_SLAB_H: float = 0.22
 
 var _sort_column: SortColumn = SortColumn.NAME
 var _sort_ascending: bool = true
@@ -812,20 +812,48 @@ func _build_map_proxy_geometry(root: Node3D) -> void:
 	var road_mat := StandardMaterial3D.new()
 	road_mat.albedo_color = Color(0.78, 0.78, 0.78)
 	road_mat.roughness = 0.92
-	var side_mat := StandardMaterial3D.new()
-	side_mat.albedo_color = Color(0.62, 0.62, 0.62)
-	side_mat.roughness = 0.94
+	road_mat.polygon_offset_factor = 2.0
+	road_mat.polygon_offset_units = 2.0
+	var plinth_mat := StandardMaterial3D.new()
+	plinth_mat.albedo_color = Color(0.62, 0.62, 0.62)
+	plinth_mat.roughness = 0.94
 	var curb_mat := StandardMaterial3D.new()
 	curb_mat.albedo_color = Color(0.9, 0.9, 0.9)
 	curb_mat.roughness = 0.85
 	var slab_y := -MAP_SLAB_H * 0.5
-	_add_map_box(root, Vector3(MAP_STREET_HALF_W * 2.0, MAP_SLAB_H, MAP_STREET_LEN), Vector3(0.0, slab_y, 0.0), road_mat)
 	var inner := MAP_STREET_HALF_W + MAP_CURB_W * 0.5
-	_add_map_box(root, Vector3(MAP_CURB_W, MAP_CURB_H, MAP_STREET_LEN), Vector3(-inner, MAP_CURB_H * 0.5 - 0.02, 0.0), curb_mat)
-	_add_map_box(root, Vector3(MAP_CURB_W, MAP_CURB_H, MAP_STREET_LEN), Vector3(inner, MAP_CURB_H * 0.5 - 0.02, 0.0), curb_mat)
-	var walk_center_x := inner + MAP_CURB_W * 0.5 + MAP_SIDEWALK_W * 0.5
-	_add_map_box(root, Vector3(MAP_SIDEWALK_W, MAP_SLAB_H, MAP_STREET_LEN), Vector3(-walk_center_x, slab_y, 0.0), side_mat)
-	_add_map_box(root, Vector3(MAP_SIDEWALK_W, MAP_SLAB_H, MAP_STREET_LEN), Vector3(walk_center_x, slab_y, 0.0), side_mat)
+	var walk_c := inner + MAP_CURB_W * 0.5 + MAP_SIDEWALK_W * 0.5
+	var corridor_h := walk_c + MAP_SIDEWALK_W * 0.5
+	var plinth_half := corridor_h + 44.0 + 4.0
+	_add_map_box(
+		root,
+		Vector3(plinth_half * 2.0, MAP_SLAB_H, plinth_half * 2.0),
+		Vector3(0.0, slab_y - 0.004, 0.0),
+		plinth_mat
+	)
+	var half_len := MAP_STREET_LEN * 0.5
+	var lane_hw := MAP_STREET_HALF_W
+	var lane_w := lane_hw * 2.0
+	var arm := half_len - lane_hw
+	var curb_y := MAP_CURB_H * 0.5 - 0.015
+	_add_map_box(root, Vector3(lane_w, MAP_SLAB_H, lane_w), Vector3(0.0, slab_y, 0.0), road_mat)
+	if arm > 0.05:
+		var z_south := -(half_len + lane_hw) * 0.5
+		var z_north := (half_len + lane_hw) * 0.5
+		var x_west := -(half_len + lane_hw) * 0.5
+		var x_east := (half_len + lane_hw) * 0.5
+		_add_map_box(root, Vector3(lane_w, MAP_SLAB_H, arm), Vector3(0.0, slab_y, z_south), road_mat)
+		_add_map_box(root, Vector3(lane_w, MAP_SLAB_H, arm), Vector3(0.0, slab_y, z_north), road_mat)
+		_add_map_box(root, Vector3(arm, MAP_SLAB_H, lane_w), Vector3(x_west, slab_y, 0.0), road_mat)
+		_add_map_box(root, Vector3(arm, MAP_SLAB_H, lane_w), Vector3(x_east, slab_y, 0.0), road_mat)
+		_add_map_box(root, Vector3(MAP_CURB_W, MAP_CURB_H, arm), Vector3(-inner, curb_y, z_south), curb_mat)
+		_add_map_box(root, Vector3(MAP_CURB_W, MAP_CURB_H, arm), Vector3(inner, curb_y, z_south), curb_mat)
+		_add_map_box(root, Vector3(MAP_CURB_W, MAP_CURB_H, arm), Vector3(-inner, curb_y, z_north), curb_mat)
+		_add_map_box(root, Vector3(MAP_CURB_W, MAP_CURB_H, arm), Vector3(inner, curb_y, z_north), curb_mat)
+		_add_map_box(root, Vector3(arm, MAP_CURB_H, MAP_CURB_W), Vector3(x_west, curb_y, -inner), curb_mat)
+		_add_map_box(root, Vector3(arm, MAP_CURB_H, MAP_CURB_W), Vector3(x_west, curb_y, inner), curb_mat)
+		_add_map_box(root, Vector3(arm, MAP_CURB_H, MAP_CURB_W), Vector3(x_east, curb_y, -inner), curb_mat)
+		_add_map_box(root, Vector3(arm, MAP_CURB_H, MAP_CURB_W), Vector3(x_east, curb_y, inner), curb_mat)
 	# Proxy ramp so map topology matches gameplay lane.
 	var ramp := MeshInstance3D.new()
 	var ramp_mesh := BoxMesh.new()
@@ -875,6 +903,14 @@ func _on_stats_pressed() -> void:
 
 
 func _on_map_pressed() -> void:
+	_show_section(Section.MAP)
+
+
+func is_map_section_active() -> bool:
+	return visible and _active_section == Section.MAP
+
+
+func show_inventory_map_section() -> void:
 	_show_section(Section.MAP)
 
 

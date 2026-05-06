@@ -7,6 +7,7 @@ const _PHOTO_BOOTH_VISUAL_LAYER: int = 2
 const _MAP_STRUCTURAL_LAYER: int = 1
 const _PHYSICAL_ITEM_SCENE: PackedScene = preload("res://PhysicalItem.tscn")
 const _CELESTIAL_CYCLE_SCRIPT: Script = preload("res://celestial_cycle.gd")
+const BUILDING_BASE_SCENE: PackedScene = preload("res://Building_Base.tscn")
 
 var _scanline_overlay: ColorRect = null
 var _compass_bar_label: Label = null
@@ -211,72 +212,153 @@ func _add_street_ramp(
 	parent.add_child(body)
 
 
-## Long strip along Z: sidewalks + curbs + wet asphalt lane (player/cart stay near center).
+func _street_corridor_half(street_half_w: float, curb_w: float, sidewalk_w: float) -> Dictionary:
+	var inner := street_half_w + curb_w * 0.5
+	var walk_center := inner + curb_w * 0.5 + sidewalk_w * 0.5
+	var corridor_half := walk_center + sidewalk_w * 0.5
+	return {"inner": inner, "walk_center": walk_center, "corridor_half": corridor_half}
+
+
+## One CSG slab (sidewalk + building pads) with a cross-shaped cutout; asphalt sits in the hole flush at y=0.
+## Avoids hundreds of coplanar sidewalk tiles (Z-fight) and fixes tessellation gaps from strip builds.
+func _build_town_square_plinth_and_roads(
+	parent: Node3D,
+	street_len: float,
+	slab_h: float,
+	curb_h: float,
+	curb_w: float,
+	inner: float,
+	street_half_w: float,
+	corridor_half: float,
+	parcel_extent: float,
+	asphalt: Material,
+	curb_mat: Material,
+	plinth_mat: Material
+) -> void:
+	var town_half := corridor_half + parcel_extent + 4.0
+	var plinth_thick := 0.34
+	var plinth_cy := -plinth_thick * 0.5
+	var lane_hw := street_half_w
+	var lane_w := lane_hw * 2.0
+	var half_len := street_len * 0.5
+	var arm_ns := half_len - lane_hw
+	var road_cy := -slab_h * 0.5
+	var curb_y := curb_h * 0.5 - 0.015
+
+	var comb := CSGCombiner3D.new()
+	comb.name = "TownSquarePlinth"
+	comb.use_collision = true
+	comb.collision_layer = 1
+	comb.layers = 1 << (_MAP_STRUCTURAL_LAYER - 1)
+	comb.position = Vector3(0.0, plinth_cy, 0.0)
+	var outer := CSGBox3D.new()
+	outer.name = "PlinthOuter"
+	outer.size = Vector3(town_half * 2.0, plinth_thick, town_half * 2.0)
+	outer.material = plinth_mat
+	var sub_ns := CSGBox3D.new()
+	sub_ns.operation = CSGShape3D.OPERATION_SUBTRACTION
+	sub_ns.size = Vector3(lane_w, plinth_thick + 1.2, street_len + 28.0)
+	var sub_ew := CSGBox3D.new()
+	sub_ew.operation = CSGShape3D.OPERATION_SUBTRACTION
+	sub_ew.size = Vector3(street_len + 28.0, plinth_thick + 1.2, lane_w)
+	comb.add_child(outer)
+	comb.add_child(sub_ns)
+	comb.add_child(sub_ew)
+	parent.add_child(comb)
+
+	_add_street_box(parent, "StreetAsphalt_IX", Vector3(lane_w, slab_h, lane_w), Vector3(0.0, road_cy, 0.0), asphalt)
+	if arm_ns > 0.05:
+		var z_south := -(half_len + lane_hw) * 0.5
+		var z_north := (half_len + lane_hw) * 0.5
+		var x_west := -(half_len + lane_hw) * 0.5
+		var x_east := (half_len + lane_hw) * 0.5
+		_add_street_box(parent, "StreetAsphalt_NS_S", Vector3(lane_w, slab_h, arm_ns), Vector3(0.0, road_cy, z_south), asphalt)
+		_add_street_box(parent, "StreetAsphalt_NS_N", Vector3(lane_w, slab_h, arm_ns), Vector3(0.0, road_cy, z_north), asphalt)
+		_add_street_box(parent, "StreetAsphalt_EW_W", Vector3(arm_ns, slab_h, lane_w), Vector3(x_west, road_cy, 0.0), asphalt)
+		_add_street_box(parent, "StreetAsphalt_EW_E", Vector3(arm_ns, slab_h, lane_w), Vector3(x_east, road_cy, 0.0), asphalt)
+		_add_street_box(parent, "CurbLeft_NS_S", Vector3(curb_w, curb_h, arm_ns), Vector3(-inner, curb_y, z_south), curb_mat)
+		_add_street_box(parent, "CurbRight_NS_S", Vector3(curb_w, curb_h, arm_ns), Vector3(inner, curb_y, z_south), curb_mat)
+		_add_street_box(parent, "CurbLeft_NS_N", Vector3(curb_w, curb_h, arm_ns), Vector3(-inner, curb_y, z_north), curb_mat)
+		_add_street_box(parent, "CurbRight_NS_N", Vector3(curb_w, curb_h, arm_ns), Vector3(inner, curb_y, z_north), curb_mat)
+		_add_street_box(parent, "CurbSouth_EW_W", Vector3(arm_ns, curb_h, curb_w), Vector3(x_west, curb_y, -inner), curb_mat)
+		_add_street_box(parent, "CurbNorth_EW_W", Vector3(arm_ns, curb_h, curb_w), Vector3(x_west, curb_y, inner), curb_mat)
+		_add_street_box(parent, "CurbSouth_EW_E", Vector3(arm_ns, curb_h, curb_w), Vector3(x_east, curb_y, -inner), curb_mat)
+		_add_street_box(parent, "CurbNorth_EW_E", Vector3(arm_ns, curb_h, curb_w), Vector3(x_east, curb_y, inner), curb_mat)
+
+
+func _place_building_mock(parent: Node3D, world_x: float, world_z: float, yaw_deg: float) -> void:
+	var inst := BUILDING_BASE_SCENE.instantiate()
+	if inst == null:
+		return
+	inst.name = "Building_%d_%d" % [int(world_x * 10.0), int(world_z * 10.0)]
+	inst.position = Vector3(world_x, 0.0, world_z)
+	inst.rotation_degrees = Vector3(0.0, yaw_deg, 0.0)
+	parent.add_child(inst)
+
+
+## Roads first (+ intersection), then outward: sidewalk corridor, parcel slabs, bone-cube buildings.
 func _build_street_layout(root: Node3D) -> void:
 	var street_root := Node3D.new()
 	street_root.name = "Street"
 	root.add_child(street_root)
+	var buildings_root := Node3D.new()
+	buildings_root.name = "CityBlockBuildings"
+	root.add_child(buildings_root)
+
 	var tex_asphalt := _make_floor_grit_texture(0xA511A1)
 	var tex_walk := _make_floor_grit_texture(0x51DEA1)
 	var tex_curb := _make_floor_grit_texture(0xC0B4E)
-	# Tile the 256² maps so long boxes still show chunky texels (nearest filter).
 	var asphalt := _make_wet_asphalt_material(tex_asphalt, Vector3(52, 52, 52))
 	var concrete := _make_dark_concrete_material(tex_walk, Vector3(34, 34, 34))
 	var curb_mat := _make_curb_material(tex_curb, Vector3(10, 6, 120))
-	var street_len := 100.0
-	var street_half_w := 4.0
+
+	# Enlarged corridor vs original strip; arms span entire mock block.
+	var street_half_w := 6.5
 	var curb_w := 0.22
 	var curb_h := 0.16
-	var sidewalk_w := 6.0
-	var slab_h := 0.2
-	# Top of flat surfaces at y = 0 (same as old ground feel).
-	var slab_y := -slab_h * 0.5
-	var z0 := 0.0
-	# Road
-	_add_street_box(
+	var sidewalk_w := 11.0
+	var slab_h := 0.22
+
+	var co := _street_corridor_half(street_half_w, curb_w, sidewalk_w)
+	var inner: float = co["inner"]
+	var corridor_half: float = co["corridor_half"]
+
+	var street_len := 132.0
+	var parcel_extent := 44.0
+
+	_build_town_square_plinth_and_roads(
 		street_root,
-		"StreetAsphalt",
-		Vector3(street_half_w * 2.0, slab_h, street_len),
-		Vector3(0.0, slab_y, z0),
-		asphalt
-	)
-	var inner := street_half_w + curb_w * 0.5
-	# Left curb (thin, long; slight lip above slab read).
-	_add_street_box(
-		street_root,
-		"CurbLeft",
-		Vector3(curb_w, curb_h, street_len),
-		Vector3(-inner, curb_h * 0.5 - 0.02, z0),
-		curb_mat
-	)
-	_add_street_box(
-		street_root,
-		"CurbRight",
-		Vector3(curb_w, curb_h, street_len),
-		Vector3(inner, curb_h * 0.5 - 0.02, z0),
-		curb_mat
-	)
-	var walk_center_x := inner + curb_w * 0.5 + sidewalk_w * 0.5
-	_add_street_box(
-		street_root,
-		"SidewalkLeft",
-		Vector3(sidewalk_w, slab_h, street_len),
-		Vector3(-walk_center_x, slab_y, z0),
+		street_len,
+		slab_h,
+		curb_h,
+		curb_w,
+		inner,
+		street_half_w,
+		corridor_half,
+		parcel_extent,
+		asphalt,
+		curb_mat,
 		concrete
 	)
-	_add_street_box(
-		street_root,
-		"SidewalkRight",
-		Vector3(sidewalk_w, slab_h, street_len),
-		Vector3(walk_center_x, slab_y, z0),
-		concrete
-	)
-	# Gentle kick ramp in-lane, close to player spawn so it’s easy to see and hit.
+
+	# Bone-block mock buildings (simple CSG cubes from Building_Base.tscn).
+	var inset := 9.0
+	var d1 := 7.0
+	var d2 := 15.0
+	_place_building_mock(buildings_root, corridor_half + inset, corridor_half + d1, 0.0)
+	_place_building_mock(buildings_root, corridor_half + d2, corridor_half + inset, 90.0)
+	_place_building_mock(buildings_root, -(corridor_half + inset), corridor_half + d1, 0.0)
+	_place_building_mock(buildings_root, -(corridor_half + d2), corridor_half + inset, -90.0)
+	_place_building_mock(buildings_root, corridor_half + d1, -(corridor_half + inset), 180.0)
+	_place_building_mock(buildings_root, corridor_half + d2, -(corridor_half + inset), 90.0)
+	_place_building_mock(buildings_root, -(corridor_half + d1), -(corridor_half + inset), 180.0)
+	_place_building_mock(buildings_root, -(corridor_half + d2), -(corridor_half + inset), -90.0)
+
 	_add_street_ramp(
 		street_root,
 		"KickRamp",
 		Vector3(3.6, 0.6, 5.0),
-		Vector3(0.0, 0.0, -14.0),
+		Vector3(0.0, 0.06, -14.0),
 		Vector3(-18.0, 180.0, 0.0),
 		asphalt
 	)

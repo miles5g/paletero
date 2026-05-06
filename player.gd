@@ -130,6 +130,8 @@ func _physics_process(delta: float) -> void:
 	_wait_t_prev_down = t_down
 	if Input.is_action_just_pressed("toggle_inventory"):
 		_toggle_inventory_menu()
+	if Input.is_action_just_pressed("inventory_map"):
+		_toggle_inventory_map_menu()
 	_update_pickup_target_and_prompt()
 	if Input.is_action_just_pressed("interact"):
 		_interact()
@@ -870,6 +872,31 @@ func _toggle_inventory_menu() -> void:
 			panel.refresh()
 	else:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+func _toggle_inventory_map_menu() -> void:
+	var panel := _inventory_menu_panel()
+	if panel == null:
+		return
+	if panel.visible and panel.has_method("is_map_section_active") and panel.is_map_section_active():
+		panel.visible = false
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		return
+	if not panel.visible:
+		panel.visible = true
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		var cart := _resolve_cart_for_inventory()
+		var inventory_owner_node: Node = self
+		if cart != null:
+			inventory_owner_node = cart
+		if panel.has_method("bind_inventory_owner"):
+			panel.bind_inventory_owner(inventory_owner_node)
+		elif cart != null and panel.has_method("bind_cart"):
+			panel.bind_cart(cart)
+		if panel.has_method("refresh"):
+			panel.refresh()
+	if panel.has_method("show_inventory_map_section"):
+		panel.show_inventory_map_section()
 
 
 func _request_wait_toggle() -> void:
