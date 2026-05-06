@@ -38,6 +38,9 @@ const MAP_CAMERA_DEFAULT_SIZE: float = 120.0
 const MAP_CAMERA_MIN_SIZE: float = 48.0
 const MAP_CAMERA_MAX_SIZE: float = 220.0
 const MAP_CAMERA_ZOOM_STEP: float = 12.0
+const MAP_WAYPOINT_BEAM_HEIGHT: float = 40.0
+const MAP_WAYPOINT_BEAM_RADIUS: float = 0.16
+const MAP_WAYPOINT_BEAM_NODE: NodePath = NodePath("MapWaypointBeam")
 const MAP_WORLD_MIN_X: float = -14.0
 const MAP_WORLD_MAX_X: float = 14.0
 const MAP_WORLD_MIN_Z: float = -55.0
@@ -89,8 +92,12 @@ var _map_camera: Camera3D = null
 var _map_overlay: Control = null
 var _map_player_marker: Polygon2D = null
 var _map_cart_marker: Label = null
+var _map_waypoint_marker: Label = null
 var _map_rose_root: Control = null
 var _map_legend_label: Label = null
+var _waypoint_world_pos: Vector3 = Vector3.ZERO
+var _has_waypoint: bool = false
+var _waypoint_beam_root: Node3D = null
 var _entries: Array[ItemResource] = []
 var _placeholder_preview_tex: Texture2D = null
 
@@ -471,6 +478,15 @@ func _build_map_view(map_root: Control) -> void:
 	_map_cart_marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_map_overlay.add_child(_map_cart_marker)
 
+	_map_waypoint_marker = Label.new()
+	_map_waypoint_marker.name = "WaypointMarker"
+	_map_waypoint_marker.text = "✕"
+	_map_waypoint_marker.add_theme_font_size_override("font_size", 15)
+	_map_waypoint_marker.add_theme_color_override("font_color", Color(1.0, 0.45, 0.45, 1.0))
+	_map_waypoint_marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_map_waypoint_marker.visible = false
+	_map_overlay.add_child(_map_waypoint_marker)
+
 	_map_rose_root = Control.new()
 	_map_rose_root.name = "MapRose"
 	_map_rose_root.anchor_left = 0.0
@@ -535,7 +551,10 @@ func _on_map_view_gui_input(event: InputEvent) -> void:
 		var mb := event as InputEventMouseButton
 		if not mb.pressed:
 			return
-		if mb.button_index == MOUSE_BUTTON_WHEEL_UP:
+		if mb.button_index == MOUSE_BUTTON_LEFT:
+			_place_waypoint_from_map(mb.position)
+			accept_event()
+		elif mb.button_index == MOUSE_BUTTON_WHEEL_UP:
 			_map_camera.size = clampf(
 				_map_camera.size - MAP_CAMERA_ZOOM_STEP,
 				MAP_CAMERA_MIN_SIZE,
@@ -586,6 +605,14 @@ func _update_map_markers() -> void:
 		_map_cart_marker.visible = true
 	else:
 		_map_cart_marker.visible = false
+	if _map_waypoint_marker != null:
+		if _has_waypoint:
+			var w2 := _world_to_map(_waypoint_world_pos, map_size, min_x, max_x, min_z, max_z)
+			_map_waypoint_marker.position = w2 - Vector2(6.0, 10.0)
+			_map_waypoint_marker.visible = true
+			_update_waypoint_beam()
+		else:
+			_map_waypoint_marker.visible = false
 
 
 func _map_visible_bounds() -> Dictionary:
@@ -625,6 +652,111 @@ func _world_to_map(
 	nx = clampf(nx, 0.0, 1.0)
 	nz = clampf(nz, 0.0, 1.0)
 	return Vector2(nx * map_size.x, nz * map_size.y)
+
+
+func _map_to_world(
+	map_pos: Vector2,
+	map_size: Vector2,
+	min_x: float,
+	max_x: float,
+	min_z: float,
+	max_z: float
+) -> Vector3:
+	var nx := clampf(map_pos.x / map_size.x, 0.0, 1.0)
+	var nz := clampf(map_pos.y / map_size.y, 0.0, 1.0)
+	var wx := lerpf(min_x, max_x, nx)
+	var wz := lerpf(min_z, max_z, nz)
+	var wy := _sample_ground_height(wx, wz)
+	return Vector3(wx, wy, wz)
+
+
+func _place_waypoint_from_map(click_pos: Vector2) -> void:
+	if _map_overlay == null:
+		return
+	var map_size := _map_overlay.size
+	if map_size.x <= 1.0 or map_size.y <= 1.0:
+		return
+	var bounds := _map_visible_bounds()
+	var min_x: float = bounds["min_x"]
+	var max_x: float = bounds["max_x"]
+	var min_z: float = bounds["min_z"]
+	var max_z: float = bounds["max_z"]
+	var clamped := Vector2(
+		clampf(click_pos.x, 0.0, map_size.x),
+		clampf(click_pos.y, 0.0, map_size.y)
+	)
+	_waypoint_world_pos = _map_to_world(clamped, map_size, min_x, max_x, min_z, max_z)
+	_has_waypoint = true
+	_update_waypoint_beam()
+
+
+func _sample_ground_height(world_x: float, world_z: float) -> float:
+	var scene := get_tree().current_scene
+	if scene == null or not (scene is Node3D):
+		return 0.05
+	var scene_root := scene as Node3D
+	var world3d := scene_root.get_world_3d()
+	if world3d == null:
+		return 0.05
+	var from := Vector3(world_x, 250.0, world_z)
+	var to := Vector3(world_x, -100.0, world_z)
+	var q := PhysicsRayQueryParameters3D.create(from, to)
+	var hit := world3d.direct_space_state.intersect_ray(q)
+	if hit.has("position"):
+		var pos: Vector3 = hit["position"]
+		return pos.y + 0.05
+	return 0.05
+
+
+func _update_waypoint_beam() -> void:
+	if not _has_waypoint:
+		return
+	var beam_root := _ensure_waypoint_beam()
+	if beam_root == null:
+		return
+	beam_root.global_position = _waypoint_world_pos
+
+
+func _ensure_waypoint_beam() -> Node3D:
+	if _waypoint_beam_root != null and is_instance_valid(_waypoint_beam_root):
+		return _waypoint_beam_root
+	var scene := get_tree().current_scene
+	if scene == null or not (scene is Node3D):
+		return null
+	var scene_root := scene as Node3D
+	var existing := scene_root.get_node_or_null(MAP_WAYPOINT_BEAM_NODE) as Node3D
+	if existing != null:
+		_waypoint_beam_root = existing
+		return _waypoint_beam_root
+	var root := Node3D.new()
+	root.name = String(MAP_WAYPOINT_BEAM_NODE)
+	var beam_mesh := MeshInstance3D.new()
+	beam_mesh.name = "BeamMesh"
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = MAP_WAYPOINT_BEAM_RADIUS
+	cyl.bottom_radius = MAP_WAYPOINT_BEAM_RADIUS
+	cyl.height = MAP_WAYPOINT_BEAM_HEIGHT
+	beam_mesh.mesh = cyl
+	beam_mesh.position.y = MAP_WAYPOINT_BEAM_HEIGHT * 0.5
+	var beam_mat := StandardMaterial3D.new()
+	beam_mat.albedo_color = Color(1.0, 0.25, 0.25, 0.55)
+	beam_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	beam_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	beam_mat.emission_enabled = true
+	beam_mat.emission = Color(1.0, 0.25, 0.25)
+	beam_mat.emission_energy_multiplier = 1.7
+	beam_mesh.material_override = beam_mat
+	root.add_child(beam_mesh)
+	var beacon := OmniLight3D.new()
+	beacon.name = "BeaconLight"
+	beacon.position.y = 1.4
+	beacon.light_energy = 1.8
+	beacon.omni_range = 5.5
+	beacon.light_color = Color(1.0, 0.3, 0.3)
+	root.add_child(beacon)
+	scene_root.add_child(root)
+	_waypoint_beam_root = root
+	return _waypoint_beam_root
 
 
 func _player_compass_forward(player: CharacterBody3D) -> Vector3:
