@@ -4,6 +4,7 @@ extends Node3D
 const FLOOR_ALBEDO_TEXTURE_RES: int = 256
 const _PHOTO_BOOTH_SCRIPT: Script = preload("res://item_photo_booth.gd")
 const _PHOTO_BOOTH_VISUAL_LAYER: int = 2
+const _PHYSICAL_ITEM_SCENE: PackedScene = preload("res://PhysicalItem.tscn")
 
 var _scanline_overlay: ColorRect = null
 
@@ -497,9 +498,10 @@ func _ready() -> void:
 		inv_panel.bind_cart(cart)
 
 	# 4. Spawn the Player
-	_spawn_player()
+	var player := _spawn_player()
+	_spawn_initial_floor_items(player)
 
-func _spawn_player() -> void:
+func _spawn_player() -> CharacterBody3D:
 	var player = CharacterBody3D.new()
 	player.name = "Player"
 	player.position = Vector3(0, 1, 0)
@@ -526,3 +528,52 @@ func _spawn_player() -> void:
 	player.add_child(p_col)
 	player.add_child(cam)
 	add_child(player)
+	return player
+
+
+func _spawn_initial_floor_items(player: CharacterBody3D) -> void:
+	if player == null:
+		return
+	var fwd := -player.global_transform.basis.z
+	fwd.y = 0.0
+	if fwd.length_squared() < 1e-6:
+		fwd = Vector3.FORWARD
+	fwd = fwd.normalized()
+	var right := player.global_transform.basis.x
+	right.y = 0.0
+	if right.length_squared() < 1e-6:
+		right = Vector3.RIGHT
+	right = right.normalized()
+
+	var item_a := ItemResource.new()
+	item_a.item_name = "Lime Paleta"
+	item_a.quantity = 1
+	item_a.weight_lbs = 1.0
+	item_a.value_usd = 1.50
+	item_a.description = "Tart lime frozen fruit bar."
+	item_a.rarity = ItemResource.Rarity.GREEN
+	item_a.category = ItemResource.Category.FOOD
+	item_a.hand_model = ItemResource.HandModel.SPHERE
+
+	var item_b := ItemResource.new()
+	item_b.item_name = "Secret Recipe"
+	item_b.quantity = 1
+	item_b.weight_lbs = 0.1
+	item_b.value_usd = 500.00
+	item_b.description = "A handwritten note with the perfect flavor ratios. Priceless."
+	item_b.rarity = ItemResource.Rarity.GOLD
+	item_b.category = ItemResource.Category.UTILITY
+	item_b.hand_model = ItemResource.HandModel.SCROLL
+
+	var spawn_a := _PHYSICAL_ITEM_SCENE.instantiate() as PhysicalItem
+	var spawn_b := _PHYSICAL_ITEM_SCENE.instantiate() as PhysicalItem
+	if spawn_a == null or spawn_b == null:
+		return
+	spawn_a.set_item_resource(item_a)
+	spawn_b.set_item_resource(item_b)
+	add_child(spawn_a)
+	add_child(spawn_b)
+	# Place two pickups on floor in front of player.
+	var base := player.global_position + fwd * 2.1 + Vector3.UP * 0.24
+	spawn_a.global_position = base + right * -0.28
+	spawn_b.global_position = base + right * 0.28
