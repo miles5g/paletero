@@ -793,6 +793,8 @@ func _apply_cart_coupling(_delta: float) -> void:
 	if current_cart == null or not is_instance_valid(current_cart):
 		return
 	var cart := current_cart
+	# 1) Build a stable forward reference used for leash anchoring.
+	#    This smooth vector prevents camera/body jitter from injecting force spikes.
 	var face := -global_transform.basis.z
 	face.y = 0.0
 	if face.length_squared() < 1e-5:
@@ -810,30 +812,41 @@ func _apply_cart_coupling(_delta: float) -> void:
 
 	var right := Vector3(-_cart_forward_smooth.z, 0.0, _cart_forward_smooth.x).normalized()
 	var wob := sin(Time.get_ticks_msec() * 0.0017) * cart_wobble_amplitude
+	# 2) Compute desired leash anchor in XZ, then derive full desired position.
 	var anchor_xz := global_position + _cart_forward_smooth * _cart_leash_m + right * wob
 	var desired := Vector3(anchor_xz.x, global_position.y + _cart_dy, anchor_xz.z)
 	var err := desired - cart.global_position
 
+	# 3) Planar spring term (position correction), with error clamped before scaling.
+	#    Clamping error before multiplying by stiffness keeps behavior predictable.
 	var err_xz := Vector3(err.x, 0.0, err.z)
 	var cap := cart_planar_err_cap
 	if err_xz.length_squared() > cap * cap:
 		err_xz = err_xz.normalized() * cap
 
+	# 4) Smooth attach blend + idle scaling:
+	#    - grab_w ramps force in after attach (anti-launch).
+	#    - idle_mul reduces spring pull when player is not actively moving.
 	var grab_w := _cart_grab_blend * _cart_grab_blend * (3.0 - 2.0 * _cart_grab_blend)
 	var idle_mul := lerpf(cart_idle_correction_scale, 1.0, _cart_push_intent)
 
 	var f_pos := Vector3(err_xz.x, 0.0, err_xz.z) * cart_couple_stiffness * grab_w * idle_mul
 
+	# 5) Velocity matching term acts like directional damping/follow behavior.
 	var v_cart_xz := Vector3(cart.linear_velocity.x, 0.0, cart.linear_velocity.z)
 	var v_player_xz := Vector3(velocity.x, 0.0, velocity.z)
 	var vel_gain := lerpf(cart_velocity_gain_idle, cart_velocity_gain_moving, _cart_push_intent) * grab_w
 	var f_vel := (v_player_xz - v_cart_xz) * vel_gain
 
+	# 6) Hard clamp final planar force to enforce upper bound under all states.
 	var f_hz := f_pos + f_vel
 	var f_cap := cart_max_planar_force * grab_w
 	if f_hz.length() > f_cap:
 		f_hz = f_hz.normalized() * f_cap
 
+	# 7) Vertical component is intentionally conservative:
+	#    - mostly downward if cart sits above target
+	#    - much weaker upward correction if cart is below target
 	var f_y := 0.0
 	if err.y > 0.02:
 		f_y = -minf(err.y, 0.12) * cart_vertical_bias_down * grab_w

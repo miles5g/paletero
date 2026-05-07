@@ -168,9 +168,15 @@ func _on_interaction_area_body_exited(body: Node3D) -> void:
 
 
 func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
+	# Integration ownership:
+	# - Player script applies translational coupling (XZ + mild Y) while pushing.
+	# - Cart script applies rotational stabilization and heading assist.
+	# Keeping these responsibilities split avoids duplicate/competing force stacks.
 	var player := _grabber_player()
 	var av := state.angular_velocity
+	# Dampen roll/pitch first so curb hits do not cascade into wobble/flip loops.
 	state.apply_torque(Vector3(-av.x, 0.0, -av.z) * roll_pitch_damping)
+	# Continuous yaw damping keeps angular velocity bounded between heading updates.
 	state.apply_torque(Vector3.UP * (-av.y * yaw_angular_damping))
 	if player != null:
 		_apply_yaw_toward_camera(state, player)
@@ -213,7 +219,9 @@ func _apply_yaw_toward_camera(state: PhysicsDirectBodyState3D, player: Character
 	var intent := 1.0
 	if player.has_method("get_cart_push_intent"):
 		intent = player.get_cart_push_intent()
+	# Look-only rotations should not steer as aggressively as active pushing input.
 	var idle_w := lerpf(yaw_align_idle_scale, 1.0, intent)
+	# P-controller on yaw error with hard torque clamp for deterministic tuning.
 	var torque := clampf(angle * yaw_align_strength * idle_w, -yaw_max_torque, yaw_max_torque)
 	state.apply_torque(Vector3.UP * torque)
 
@@ -223,6 +231,7 @@ func _apply_grabbed_grounding(state: PhysicsDirectBodyState3D) -> void:
 		return
 	if state.linear_velocity.y < falling_velocity_threshold:
 		return
+	# Downward bias is applied only when supported so real drops remain ballistic.
 	state.apply_central_force(Vector3.DOWN * grabbed_downward_bias)
 
 
