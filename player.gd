@@ -14,6 +14,11 @@ const PICKUP_NEAR_DIST: float = 2.6
 
 @export var push_force: float = 2.0
 @export var mouse_sensitivity: float = 0.0025
+## Camera flick-roll: adds a small tilt on fast right flicks for extra feel.
+@export var cam_flick_roll_deg: float = 1.4
+@export var cam_flick_roll_threshold: float = 42.0
+@export var cam_flick_roll_snap_speed: float = 16.0
+@export var cam_flick_roll_return_speed: float = 9.0
 ## Cart planar coupling while pushing: weak spring to leash point + velocity tracking (no mega-springs).
 @export var cart_couple_stiffness: float = 380.0
 @export var cart_velocity_gain_moving: float = 52.0
@@ -100,6 +105,7 @@ var _player_transparency_target: float = 0.0
 var _wait_t_prev_down: bool = false
 var inventory_list: Array[ItemResource] = []
 var _camera_steer_tip_debug: MeshInstance3D = null
+var _cam_flick_roll_target_deg: float = 0.0
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -167,6 +173,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and _camera and not _is_inventory_menu_open():
 		rotate_y(-event.relative.x * mouse_sensitivity)
 		_camera.rotate_object_local(Vector3.RIGHT, -event.relative.y * mouse_sensitivity)
+		# Right flicks briefly roll camera for a more tactile turn feeling.
+		if event.relative.x > cam_flick_roll_threshold:
+			_cam_flick_roll_target_deg = -cam_flick_roll_deg
 		var pitch := _camera.rotation_degrees.x
 		_camera.rotation_degrees.x = clampf(pitch, -80.0, 80.0)
 
@@ -227,6 +236,7 @@ func _physics_process(delta: float) -> void:
 		velocity.z = move_toward(velocity.z, 0, move_speed)
 
 	move_and_slide()
+	_update_camera_flick_roll(delta)
 	_update_free_arms_visual(delta, input_dir.length() > 0.01 and is_on_floor())
 	_update_held_items_transform()
 	_update_player_occlusion_fade(delta)
@@ -1059,6 +1069,16 @@ func _enforce_cart_hard_stop() -> void:
 	if back_speed > 0.0:
 		v += face * back_speed
 		cart.linear_velocity = v
+
+
+func _update_camera_flick_roll(delta: float) -> void:
+	if _camera == null or not is_instance_valid(_camera):
+		return
+	# Fast blend toward the flick target, then decay target back to neutral.
+	var z := _camera.rotation_degrees.z
+	z = lerpf(z, _cam_flick_roll_target_deg, clampf(cam_flick_roll_snap_speed * delta, 0.0, 1.0))
+	_camera.rotation_degrees.z = z
+	_cam_flick_roll_target_deg = lerpf(_cam_flick_roll_target_deg, 0.0, clampf(cam_flick_roll_return_speed * delta, 0.0, 1.0))
 
 func _detach_from_cart() -> void:
 	var cart := current_cart
