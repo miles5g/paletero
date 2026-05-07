@@ -471,8 +471,8 @@ func show_money_popup(delta_usd: float) -> void:
 	popup.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	popup.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	popup.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	var sign := "+" if delta_usd >= 0.0 else "-"
-	popup.text = "%s$%.2f" % [sign, absf(delta_usd)]
+	var money_sign := "+" if delta_usd >= 0.0 else "-"
+	popup.text = "%s$%.2f" % [money_sign, absf(delta_usd)]
 	popup.add_theme_font_size_override("font_size", 13)
 	popup.add_theme_color_override(
 		"font_color",
