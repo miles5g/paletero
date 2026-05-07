@@ -32,6 +32,10 @@ const PICKUP_NEAR_DIST: float = 2.6
 @export var cart_leash_max_m: float = 2.22
 ## Additional forward pull when cart is behind player after a fast turn.
 @export var cart_behind_recovery_force: float = 220.0
+## Hard-stop: rear of cart cannot drift farther behind player than this distance.
+@export var cart_hard_stop_behind_m: float = 1.55
+## Approximate center->rear offset used by hard-stop rear clamp.
+@export var cart_rear_offset_m: float = 0.9
 ## Jump-sync: cart launch vertical speed relative to player jump speed.
 @export var cart_jump_vertical_scale: float = 1.4
 ## Jump-sync: blend cart XZ momentum toward player XZ at jump time.
@@ -229,8 +233,12 @@ func _physics_process(delta: float) -> void:
 
 	if is_pushing and current_cart != null:
 		current_cart.sleeping = false
+		# Absolute pre-clamp: prevent any frame from starting behind the hard-stop.
+		_enforce_cart_hard_stop()
 		_cart_grab_blend = minf(1.0, _cart_grab_blend + delta / maxf(0.04, cart_grab_blend_sec))
 		_apply_cart_coupling(delta)
+		# Absolute post-clamp: catches extreme camera flicks in the same tick.
+		_enforce_cart_hard_stop()
 		_update_push_arms_visual()
 
 	for i in get_slide_collision_count():
@@ -984,6 +992,25 @@ func _apply_cart_coupling(_delta: float) -> void:
 	if f_hz.length() > f_cap:
 		f_hz = f_hz.normalized() * f_cap
 
+	# 6b) Absolute rear hard-stop while pushing:
+	# If cart rear crosses too far behind player, snap it back to boundary and
+	# remove any velocity component that would keep moving it farther back.
+	var rear_world := cart.global_position + cart.global_transform.basis.z * cart_rear_offset_m
+	var to_rear_xz := rear_world - global_position
+	to_rear_xz.y = 0.0
+	var rear_behind := maxf(0.0, -to_rear_xz.dot(face))
+	var rear_limit := maxf(0.2, cart_hard_stop_behind_m)
+	if rear_behind > rear_limit:
+		var overshoot := rear_behind - rear_limit
+		var p := cart.global_position
+		p += face * overshoot
+		cart.global_position = p
+		var v := cart.linear_velocity
+		var back_speed := -v.dot(face)
+		if back_speed > 0.0:
+			v += face * back_speed
+			cart.linear_velocity = v
+
 	# 7) Vertical component is intentionally conservative:
 	#    - mostly downward if cart sits above target
 	#    - much weaker upward correction if cart is below target
@@ -999,6 +1026,39 @@ func _apply_cart_coupling(_delta: float) -> void:
 	# Ramp side hits can transiently make err.y very negative and cause pop/launch.
 
 	cart.apply_central_force(Vector3(f_hz.x, f_y, f_hz.z))
+
+
+func _enforce_cart_hard_stop() -> void:
+	if not is_pushing or current_cart == null or not is_instance_valid(current_cart):
+		return
+	var cart := current_cart
+	var face := -global_transform.basis.z
+	face.y = 0.0
+	if face.length_squared() < 1e-6:
+		face = _cart_forward_smooth
+	if face.length_squared() < 1e-6:
+		face = Vector3(0.0, 0.0, -1.0)
+	face = face.normalized()
+
+	var rear_world := cart.global_position + cart.global_transform.basis.z * cart_rear_offset_m
+	var to_rear_xz := rear_world - global_position
+	to_rear_xz.y = 0.0
+	var rear_behind := maxf(0.0, -to_rear_xz.dot(face))
+	var rear_limit := maxf(0.2, cart_hard_stop_behind_m)
+	if rear_behind <= rear_limit:
+		return
+
+	var overshoot := rear_behind - rear_limit
+	var p := cart.global_position
+	p += face * overshoot
+	cart.global_position = p
+
+	# Remove backward drift so it cannot immediately slide behind again.
+	var v := cart.linear_velocity
+	var back_speed := -v.dot(face)
+	if back_speed > 0.0:
+		v += face * back_speed
+		cart.linear_velocity = v
 
 func _detach_from_cart() -> void:
 	var cart := current_cart
