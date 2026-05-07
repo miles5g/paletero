@@ -721,16 +721,29 @@ func _ready() -> void:
 	# Smaller + raised hull = better curb/speed-bump clearance without changing visible cart size.
 	cart_col.shape.size = Vector3(1, 0.72, 1.5)
 	cart_col.position.y = 0.24
-	# Front ramp collider: acts like chunky front tires for head-on curb climbing.
+	# Front ramp collider: steeper and slightly taller to improve head-on curb climbing.
+	# This acts like a broad caster assembly that converts forward impact into lift.
 	var front_bump_col = CollisionShape3D.new()
 	front_bump_col.shape = BoxShape3D.new()
-	front_bump_col.shape.size = Vector3(0.86, 0.18, 0.34)
-	front_bump_col.position = Vector3(0.0, 0.05, -0.74)
-	front_bump_col.rotation.x = deg_to_rad(28.0)
+	front_bump_col.shape.size = Vector3(0.9, 0.24, 0.4)
+	front_bump_col.position = Vector3(0.0, 0.09, -0.78)
+	front_bump_col.rotation.x = deg_to_rad(36.0)
+	# Two rounded front contacts mimic left/right front wheel behavior for head-on obstacles.
+	# Spheres reduce edge snagging versus a single flat face, especially at curb corners.
+	var front_wheel_l = CollisionShape3D.new()
+	front_wheel_l.shape = SphereShape3D.new()
+	front_wheel_l.shape.radius = 0.175
+	front_wheel_l.position = Vector3(-0.31, 0.1, -0.8)
+	var front_wheel_r = CollisionShape3D.new()
+	front_wheel_r.shape = SphereShape3D.new()
+	front_wheel_r.shape.radius = 0.175
+	front_wheel_r.position = Vector3(0.31, 0.1, -0.8)
 	
 	cart.add_child(cart_mesh)
 	cart.add_child(cart_col)
 	cart.add_child(front_bump_col)
+	cart.add_child(front_wheel_l)
+	cart.add_child(front_wheel_r)
 	add_child(cart)
 	# InteractionArea lives on cart script; place on +Z local side facing player spawn (0,*,0) vs cart at z=-5.
 	var interaction_area := cart.get_node_or_null("InteractionArea") as Area3D

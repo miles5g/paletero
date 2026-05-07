@@ -24,11 +24,15 @@ const PICKUP_NEAR_DIST: float = 2.6
 @export var cart_idle_correction_scale: float = 0.16
 @export var cart_forward_track_moving: float = 9.0
 @export var cart_forward_track_idle: float = 3.2
+## Extra smoothing boost when body facing changes abruptly (camera flick / 180 turn).
+@export var cart_turn_catchup_track_bonus: float = 16.0
 @export var cart_wobble_amplitude: float = 0.0
 @export var cart_vertical_bias_down: float = 420.0
 @export var cart_vertical_bias_up: float = 160.0
 @export var cart_leash_min_m: float = 0.55
 @export var cart_leash_max_m: float = 2.08
+## Additional forward pull when cart is behind player after a fast turn.
+@export var cart_behind_recovery_force: float = 220.0
 var gravity = ProjectSettings.get_setting("physics/3d/default_gravity")
 
 var is_pushing: bool = false
@@ -802,7 +806,10 @@ func _apply_cart_coupling(_delta: float) -> void:
 	if face.length_squared() < 1e-5:
 		face = Vector3(0.0, 0.0, -1.0)
 	face = face.normalized()
+	var turn_angle := absf(_cart_forward_smooth.signed_angle_to(face, Vector3.UP))
+	var turn_catchup := clampf((turn_angle - 0.35) / 2.2, 0.0, 1.0)
 	var track_eff := lerpf(cart_forward_track_idle, cart_forward_track_moving, _cart_push_intent)
+	track_eff += cart_turn_catchup_track_bonus * turn_catchup
 	var alpha := 1.0 - exp(-track_eff * _delta)
 	_cart_forward_smooth = _cart_forward_smooth.lerp(face, alpha)
 	if _cart_forward_smooth.length_squared() < 1e-5:
@@ -837,9 +844,15 @@ func _apply_cart_coupling(_delta: float) -> void:
 	var v_player_xz := Vector3(velocity.x, 0.0, velocity.z)
 	var vel_gain := lerpf(cart_velocity_gain_idle, cart_velocity_gain_moving, _cart_push_intent) * grab_w
 	var f_vel := (v_player_xz - v_cart_xz) * vel_gain
+	# If the cart ends up behind after a sharp turn, add bounded forward recovery pull.
+	var to_cart_xz := cart.global_position - global_position
+	to_cart_xz.y = 0.0
+	var behind_dist := maxf(0.0, -to_cart_xz.dot(face))
+	var behind_w := clampf(behind_dist / maxf(0.2, _cart_leash_m * 0.6), 0.0, 1.0)
+	var f_recover := face * (cart_behind_recovery_force * behind_w * grab_w)
 
 	# 6) Hard clamp final planar force to enforce upper bound under all states.
-	var f_hz := f_pos + f_vel
+	var f_hz := f_pos + f_vel + f_recover
 	var f_cap := cart_max_planar_force * grab_w
 	if f_hz.length() > f_cap:
 		f_hz = f_hz.normalized() * f_cap
