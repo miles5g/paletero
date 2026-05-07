@@ -28,11 +28,18 @@ const PICKUP_NEAR_DIST: float = 2.6
 @export var cart_turn_catchup_track_bonus: float = 16.0
 @export var cart_wobble_amplitude: float = 0.0
 @export var cart_vertical_bias_down: float = 420.0
-@export var cart_vertical_bias_up: float = 160.0
 @export var cart_leash_min_m: float = 0.55
 @export var cart_leash_max_m: float = 2.08
 ## Additional forward pull when cart is behind player after a fast turn.
 @export var cart_behind_recovery_force: float = 220.0
+## Jump-sync: cart launch vertical speed relative to player jump speed.
+@export var cart_jump_vertical_scale: float = 1.0
+## Jump-sync: blend cart XZ momentum toward player XZ at jump time.
+@export var cart_jump_momentum_blend: float = 0.72
+## Seconds after jump where cart vertical follow overrides downward hold.
+@export var cart_jump_sync_window_sec: float = 0.24
+## Upward follow gain during jump-sync window (align cart vy to player vy).
+@export var cart_jump_vertical_follow_gain: float = 165.0
 var gravity = ProjectSettings.get_setting("physics/3d/default_gravity")
 
 var is_pushing: bool = false
@@ -48,6 +55,7 @@ var _cart_dy: float = 0.0
 var _cart_grab_blend: float = 1.0
 ## 0 = no movement keys while pushing; 1 = full WASD deflection (used to soften leash when standing).
 var _cart_push_intent: float = 0.0
+var _cart_jump_sync_t: float = 0.0
 var _active_client: Node3D = null
 var can_interact: bool = false
 
@@ -151,9 +159,14 @@ func _physics_process(delta: float) -> void:
 
 	if not is_on_floor():
 		velocity.y -= gravity * delta
+	if _cart_jump_sync_t > 0.0:
+		_cart_jump_sync_t = maxf(0.0, _cart_jump_sync_t - delta)
 
+	var did_jump := false
 	if Input.is_action_just_pressed("jump") and is_on_floor():
 		velocity.y = JUMP_VELOCITY
+		_cart_jump_sync_t = cart_jump_sync_window_sec
+		did_jump = true
 
 	var want_stand := not Input.is_action_pressed("crouch")
 	var geometry_crouch := Input.is_action_pressed("crouch") or (want_stand and not _can_uncrouch_to_stand())
@@ -186,6 +199,8 @@ func _physics_process(delta: float) -> void:
 
 	if is_pushing and current_cart != null:
 		current_cart.sleeping = false
+		if did_jump:
+			_sync_cart_jump_launch()
 		_cart_grab_blend = minf(1.0, _cart_grab_blend + delta / maxf(0.04, cart_grab_blend_sec))
 		_apply_cart_coupling(delta)
 		_update_push_arms_visual()
@@ -457,6 +472,19 @@ func _apply_bank_delta(delta_usd: float) -> void:
 	var w := get_parent()
 	if w != null and w.has_method("show_money_popup"):
 		w.show_money_popup(delta_usd)
+
+
+func _sync_cart_jump_launch() -> void:
+	if current_cart == null or not is_instance_valid(current_cart):
+		return
+	var v := current_cart.linear_velocity
+	var player_xz := Vector3(velocity.x, 0.0, velocity.z)
+	var cart_xz := Vector3(v.x, 0.0, v.z)
+	var launch_xz := cart_xz.lerp(player_xz, clampf(cart_jump_momentum_blend, 0.0, 1.0))
+	v.x = launch_xz.x
+	v.z = launch_xz.z
+	v.y = maxf(v.y, JUMP_VELOCITY * cart_jump_vertical_scale)
+	current_cart.linear_velocity = v
 
 
 func _refresh_manifest_after_sale() -> void:
@@ -932,10 +960,15 @@ func _apply_cart_coupling(_delta: float) -> void:
 	#    - mostly downward if cart sits above target
 	#    - much weaker upward correction if cart is below target
 	var f_y := 0.0
-	if err.y > 0.02:
+	if _cart_jump_sync_t > 0.0:
+		# Jump-sync window: avoid downward hold fighting the launch.
+		# Track player vertical velocity so cart loft matches player jump arc more closely.
+		var vy_err := velocity.y - cart.linear_velocity.y
+		f_y = clampf(vy_err * cart_jump_vertical_follow_gain * grab_w, -120.0, 280.0)
+	elif err.y > 0.02:
 		f_y = -minf(err.y, 0.12) * cart_vertical_bias_down * grab_w
-	elif err.y < -0.06:
-		f_y = -err.y * cart_vertical_bias_up * grab_w * 0.35
+	# Outside jump-sync, never add upward force from height error.
+	# Ramp side hits can transiently make err.y very negative and cause pop/launch.
 
 	cart.apply_central_force(Vector3(f_hz.x, f_y, f_hz.z))
 

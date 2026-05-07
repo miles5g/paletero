@@ -10,7 +10,6 @@ const _CELESTIAL_CYCLE_SCRIPT: Script = preload("res://celestial_cycle.gd")
 const _CLIENT_NPC_SCRIPT: Script = preload("res://client_npc.gd")
 const BUILDING_BASE_SCENE: PackedScene = preload("res://Building_Base.tscn")
 
-var _scanline_overlay: ColorRect = null
 var _compass_bar_label: Label = null
 var _compass_waypoint_label: Label = null
 var _compass_caret_label: Label = null
@@ -397,14 +396,6 @@ func _apply_terminal_theme_to_node(node: Node, font: Font, font_size: int) -> vo
 		_apply_terminal_theme_to_node(c, font, font_size)
 
 
-func _update_scanline_display_height() -> void:
-	if _scanline_overlay == null:
-		return
-	var sm := _scanline_overlay.material as ShaderMaterial
-	if sm:
-		sm.set_shader_parameter("display_height", get_viewport().get_visible_rect().size.y)
-
-
 func _heading_degrees_from_player(player: CharacterBody3D) -> float:
 	if player == null:
 		return 0.0
@@ -583,21 +574,6 @@ func _ready() -> void:
 	var term_inv_font := _make_terminal_font()
 	_apply_terminal_theme_to_node(inv_menu, term_inv_font, 13)
 
-	var scan := ColorRect.new()
-	scan.name = "ScanlineOverlay"
-	scan.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	scan.set_anchors_preset(Control.PRESET_FULL_RECT)
-	var sm := ShaderMaterial.new()
-	sm.shader = load("res://hud_scanlines.gdshader")
-	sm.set_shader_parameter("line_spacing", 4.0)
-	sm.set_shader_parameter("line_opacity", 0.1)
-	scan.material = sm
-	hud.add_child(scan)
-	_scanline_overlay = scan
-	call_deferred("_update_scanline_display_height")
-	if not get_viewport().size_changed.is_connected(_update_scanline_display_height):
-		get_viewport().size_changed.connect(_update_scanline_display_height)
-
 	var term_ui_font := _make_terminal_font()
 	_apply_terminal_theme_to_node(prompt_box, term_ui_font, 14)
 
@@ -671,7 +647,7 @@ func _ready() -> void:
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(0.28, 0.25, 0.24)
 	env.ambient_light_energy = 1.1
-	env.fog_enabled = true
+	env.fog_enabled = false
 	env.fog_light_color = Color(0.36, 0.33, 0.31)
 	env.fog_density = 0.052
 	env.fog_sky_affect = 1.0
@@ -700,7 +676,7 @@ func _ready() -> void:
 	cart.name = "Cart"
 	cart.mass = 12.0
 	cart.linear_damp = 0.32
-	cart.gravity_scale = 1.18
+	cart.gravity_scale = 1.0
 	# Lighter cart: less angular drag so it feels a bit floatier while still settling.
 	cart.angular_damp = 4.8
 	cart.physics_material_override = PhysicsMaterial.new()
