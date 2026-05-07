@@ -37,6 +37,8 @@ var gravity = ProjectSettings.get_setting("physics/3d/default_gravity")
 
 var is_pushing: bool = false
 var current_cart: RigidBody3D = null
+## Global player cash ledger ("single source of truth" for sale payouts).
+var bank_usd: float = 0.0
 var _cart_leash_m: float = 2.0
 ## Smoothed horizontal forward for leash anchor (lags body yaw).
 var _cart_forward_smooth: Vector3 = Vector3.ZERO
@@ -46,6 +48,7 @@ var _cart_dy: float = 0.0
 var _cart_grab_blend: float = 1.0
 ## 0 = no movement keys while pushing; 1 = full WASD deflection (used to soften leash when standing).
 var _cart_push_intent: float = 0.0
+var _active_client: Node3D = null
 var can_interact: bool = false
 
 var _mesh_instance: MeshInstance3D
@@ -397,6 +400,8 @@ func punch_right() -> void:
 	_apply_punch_camera_jitter(1.0)
 
 func _interact() -> void:
+	if _try_sell_to_client():
+		return
 	if is_pushing:
 		_detach_from_cart()
 		return
@@ -412,6 +417,55 @@ func _interact() -> void:
 		return
 	if not can_interact:
 		return
+
+
+func _best_sellable_held_item() -> PhysicalItem:
+	if _right_hand_item != null and is_instance_valid(_right_hand_item):
+		if _right_hand_item.item_resource != null and _right_hand_item.item_resource.value_usd > 0.0:
+			return _right_hand_item
+	if _left_hand_item != null and is_instance_valid(_left_hand_item):
+		if _left_hand_item.item_resource != null and _left_hand_item.item_resource.value_usd > 0.0:
+			return _left_hand_item
+	return null
+
+
+func _try_sell_to_client() -> bool:
+	if _active_client == null or not is_instance_valid(_active_client):
+		return false
+	var hand_item := _best_sellable_held_item()
+	if hand_item == null:
+		return false
+	var res := hand_item.take_item_resource()
+	if res == null:
+		return false
+	var payout := res.value_usd * float(maxi(1, res.quantity))
+	bank_usd += payout
+	if hand_item == _left_hand_item:
+		_left_hand_item.queue_free()
+		_left_hand_item = null
+	else:
+		_right_hand_item.queue_free()
+		_right_hand_item = null
+	_refresh_hand_slot_hud()
+	_refresh_manifest_after_sale()
+	print("Sale complete: +$%.2f for %s" % [payout, res.item_name])
+	return true
+
+
+func _refresh_manifest_after_sale() -> void:
+	var panel := _inventory_menu_panel()
+	if panel != null:
+		if panel.has_method("update_total_manifest_weight"):
+			panel.update_total_manifest_weight()
+		if panel.visible and panel.has_method("refresh"):
+			panel.refresh()
+	if has_method("calculate_total_weight"):
+		calculate_total_weight()
+	if current_cart != null and is_instance_valid(current_cart):
+		if current_cart.has_method("calculate_total_weight"):
+			current_cart.calculate_total_weight()
+		if current_cart.has_method("update_mass"):
+			current_cart.update_mass()
 
 func _set_held_items_visible(v: bool) -> void:
 	if _right_hand_item != null and is_instance_valid(_right_hand_item):
@@ -613,6 +667,16 @@ func _update_pickup_target_and_prompt() -> void:
 		return
 	var w := get_parent()
 	if w == null:
+		return
+	_active_client = null
+	for c in get_tree().get_nodes_in_group("clients"):
+		if c is Node3D and c.has_method("is_player_in_range") and c.is_player_in_range(self):
+			_active_client = c
+			break
+	var sell_item := _best_sellable_held_item()
+	if _active_client != null and sell_item != null and w.has_method("set_interaction_prompt_text") and w.has_method("set_grab_prompts_visible"):
+		w.set_interaction_prompt_text("[E] Sell %s for $%.2f" % [sell_item.display_name(), sell_item.item_resource.value_usd * float(maxi(1, sell_item.item_resource.quantity))])
+		w.set_grab_prompts_visible(true)
 		return
 	if can_interact and w.has_method("set_interaction_prompt_text") and w.has_method("set_grab_prompts_visible"):
 		w.set_interaction_prompt_text("[E] Grab Cart")

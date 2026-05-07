@@ -7,6 +7,7 @@ const _PHOTO_BOOTH_VISUAL_LAYER: int = 2
 const _MAP_STRUCTURAL_LAYER: int = 1
 const _PHYSICAL_ITEM_SCENE: PackedScene = preload("res://PhysicalItem.tscn")
 const _CELESTIAL_CYCLE_SCRIPT: Script = preload("res://celestial_cycle.gd")
+const _CLIENT_NPC_SCRIPT: Script = preload("res://client_npc.gd")
 const BUILDING_BASE_SCENE: PackedScene = preload("res://Building_Base.tscn")
 
 var _scanline_overlay: ColorRect = null
@@ -756,6 +757,8 @@ func _ready() -> void:
 
 	# 4. Spawn the Player
 	var player := _spawn_player()
+	# 5. Spawn one customer for early transaction gameplay.
+	_spawn_client_npc()
 	_spawn_initial_floor_items(player)
 
 
@@ -792,6 +795,25 @@ func _spawn_player() -> CharacterBody3D:
 	player.add_child(cam)
 	add_child(player)
 	return player
+
+
+func _spawn_client_npc() -> void:
+	var client := StaticBody3D.new()
+	client.name = "ClientNPC"
+	client.set_script(_CLIENT_NPC_SCRIPT)
+	client.position = Vector3(5.5, 1.0, -3.4)
+	var mesh := MeshInstance3D.new()
+	mesh.mesh = CapsuleMesh.new()
+	mesh.layers = 1 << (3 - 1)
+	var col := CollisionShape3D.new()
+	col.shape = CapsuleShape3D.new()
+	(mesh.mesh as CapsuleMesh).radius = 0.42
+	(mesh.mesh as CapsuleMesh).height = 1.15
+	(col.shape as CapsuleShape3D).radius = 0.42
+	(col.shape as CapsuleShape3D).height = 1.15
+	client.add_child(mesh)
+	client.add_child(col)
+	add_child(client)
 
 
 func _spawn_initial_floor_items(player: CharacterBody3D) -> void:
