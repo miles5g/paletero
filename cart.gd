@@ -7,11 +7,17 @@ extends RigidBody3D
 ## =============================================================================
 
 ## --- Yaw (camera vs cart heading) — torque only, no offset wheel forces ---
-@export var yaw_align_strength: float = 42.0
+@export var yaw_align_strength: float = 164.0
 @export var yaw_angular_damping: float = 6.0
-@export var yaw_max_torque: float = 95.0
+@export var yaw_max_torque: float = 370.0
 ## Scale yaw correction when player is not pressing movement (look-only).
 @export var yaw_align_idle_scale: float = 0.35
+## Debug: draw camera/cart steering sources and connecting rope (visual only).
+@export var steer_debug_visible: bool = true
+@export var steer_source_cart_forward: float = 2.0
+@export var steer_source_cart_height: float = 0.4
+## Hard-stop maximum rope length between source A (camera) and B (cart).
+@export var steer_rope_max_len: float = 2.5
 
 ## --- Angular stability (curbs / impacts) ---
 @export var roll_pitch_damping: float = 8.0
@@ -25,6 +31,8 @@ var _handle_zone: Area3D
 var _interaction_area: Area3D
 ## Snapshot from spawn (`world.gd`); physics mass stays fixed regardless of inventory.
 var _base_mass: float = 1.0
+var _steer_source_cart_debug: MeshInstance3D = null
+var _steer_rope_debug: MeshInstance3D = null
 
 var inventory_list: Array[ItemResource] = []
 
@@ -47,6 +55,39 @@ func _ready() -> void:
 	_handle_zone.add_child(hz_shape)
 	add_child(_handle_zone)
 	_handle_zone.position = Vector3(0, 0, 0.75)
+
+	# Debug: cart-local source point B (red) and rope AB (yellow) to camera source A.
+	if steer_debug_visible:
+		var src := MeshInstance3D.new()
+		src.name = "CartSourceDebug"
+		var s_mesh := SphereMesh.new()
+		s_mesh.radius = 0.1
+		s_mesh.height = 0.2
+		src.mesh = s_mesh
+		var s_mat := StandardMaterial3D.new()
+		s_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		s_mat.albedo_color = Color(1.0, 0.25, 0.25, 0.96)
+		s_mat.emission_enabled = true
+		s_mat.emission = s_mat.albedo_color * 0.7
+		src.material_override = s_mat
+		add_child(src)
+		_steer_source_cart_debug = src
+
+		var rope := MeshInstance3D.new()
+		rope.name = "CartRopeDebug"
+		var r_mesh := CylinderMesh.new()
+		r_mesh.top_radius = 0.04
+		r_mesh.bottom_radius = 0.04
+		r_mesh.height = 1.0
+		rope.mesh = r_mesh
+		var r_mat := StandardMaterial3D.new()
+		r_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		r_mat.albedo_color = Color(1.0, 0.92, 0.25, 0.96)
+		r_mat.emission_enabled = true
+		r_mat.emission = r_mat.albedo_color * 0.5
+		rope.material_override = r_mat
+		add_child(rope)
+		_steer_rope_debug = rope
 
 	_interaction_area = Area3D.new()
 	_interaction_area.name = "InteractionArea"
@@ -181,6 +222,9 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	if player != null:
 		_apply_yaw_toward_camera(state, player)
 		_apply_grabbed_grounding(state)
+		_update_steer_debug_sources(state, player)
+	elif steer_debug_visible:
+		_update_steer_debug_sources(state, null)
 
 
 func _grabber_player() -> CharacterBody3D:
@@ -203,11 +247,32 @@ func _apply_yaw_toward_camera(state: PhysicsDirectBodyState3D, player: Character
 			break
 	if cam == null:
 		return
-	var want := -cam.global_transform.basis.z
-	want.y = 0.0
-	if want.length_squared() < 1e-6:
+	# Steering target is the rope direction: cart source B pulled toward camera source A.
+	var cart_front_world := global_transform.origin \
+		+ (-global_transform.basis.z) * steer_source_cart_forward
+	var src_a_valid := false
+	var src_a := Vector3.ZERO
+	var tip := cam.get_node_or_null("CameraSteerTipDebug") as MeshInstance3D
+	if tip != null and is_instance_valid(tip):
+		src_a = tip.global_position
+		src_a_valid = true
+	else:
+		var cam_fwd := -cam.global_transform.basis.z
+		if cam_fwd.length_squared() > 1e-6:
+			cam_fwd = cam_fwd.normalized()
+			src_a = cam.global_transform.origin + cam_fwd * 6.0
+			src_a_valid = true
+	if not src_a_valid:
 		return
-	want = want.normalized()
+	var rope_dir_full := src_a - cart_front_world
+	var rope_len_full := rope_dir_full.length()
+	if rope_len_full > maxf(0.2, steer_rope_max_len):
+		src_a = cart_front_world + (rope_dir_full / rope_len_full) * steer_rope_max_len
+	var rope_dir := src_a - cart_front_world
+	rope_dir.y = 0.0
+	if rope_dir.length_squared() < 1e-6:
+		return
+	var want := rope_dir.normalized()
 	var fwd := -state.transform.basis.z
 	fwd.y = 0.0
 	if fwd.length_squared() < 1e-6:
@@ -239,6 +304,69 @@ func _apply_grabbed_grounding(state: PhysicsDirectBodyState3D) -> void:
 		return
 	# Downward bias is applied only when supported so real drops remain ballistic.
 	state.apply_central_force(Vector3.DOWN * grabbed_downward_bias)
+
+
+func _update_steer_debug_sources(state: PhysicsDirectBodyState3D, player: CharacterBody3D) -> void:
+	if not steer_debug_visible:
+		if _steer_source_cart_debug != null:
+			_steer_source_cart_debug.visible = false
+		if _steer_rope_debug != null:
+			_steer_rope_debug.visible = false
+		return
+	if _steer_source_cart_debug == null or _steer_rope_debug == null:
+		return
+	# Source B: cart-local, in front of the cart.
+	var cart_front_world := global_transform.origin \
+		+ (-global_transform.basis.z) * steer_source_cart_forward \
+		+ Vector3.UP * steer_source_cart_height
+	_steer_source_cart_debug.visible = true
+	_steer_source_cart_debug.global_position = cart_front_world
+
+	# Source A: camera tip in front of the player's gaze, if available.
+	var src_a_valid := false
+	var src_a := Vector3.ZERO
+	if player != null and is_instance_valid(player):
+		for c in player.get_children():
+			if c is Camera3D:
+				var cam := c as Camera3D
+				var tip := cam.get_node_or_null("CameraSteerTipDebug") as MeshInstance3D
+				if tip != null and is_instance_valid(tip):
+					src_a = tip.global_position
+					src_a_valid = true
+				else:
+					var cam_fwd := -cam.global_transform.basis.z
+					if cam_fwd.length_squared() > 1e-6:
+						cam_fwd = cam_fwd.normalized()
+						src_a = cam.global_transform.origin + cam_fwd * 6.0
+						src_a_valid = true
+				break
+
+	if not src_a_valid:
+		_steer_rope_debug.visible = false
+		return
+
+	# Rope AB: simple cylinder between A and B.
+	var dir := src_a - cart_front_world
+	var hard_max := maxf(0.2, steer_rope_max_len)
+	var dir_len := dir.length()
+	if dir_len > hard_max:
+		dir = (dir / dir_len) * hard_max
+	var h := dir.length()
+	if h < 0.05:
+		_steer_rope_debug.visible = false
+		return
+	_steer_rope_debug.visible = true
+	var y_axis := dir / h
+	var x_axis := y_axis.cross(Vector3.FORWARD)
+	if x_axis.length_squared() < 1e-6:
+		x_axis = y_axis.cross(Vector3.RIGHT)
+	x_axis = x_axis.normalized()
+	var z_axis := x_axis.cross(y_axis).normalized()
+	x_axis = y_axis.cross(z_axis).normalized()
+	_steer_rope_debug.global_position = cart_front_world + dir * 0.5
+	_steer_rope_debug.global_basis = Basis(x_axis, y_axis, z_axis)
+	var cyl := _steer_rope_debug.mesh as CylinderMesh
+	cyl.height = h
 
 
 func is_player_in_handle_zone(player: CharacterBody3D) -> bool:

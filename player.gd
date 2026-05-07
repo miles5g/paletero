@@ -5,7 +5,7 @@ const SPRINT_SPEED: float = BASE_SPEED * 1.6
 const CROUCH_SPEED: float = BASE_SPEED * 0.5
 const JUMP_VELOCITY: float = 4.5
 ## Max walk speed while hitched (higher than old cap so pushing feels brisk).
-const PUSH_MOVE_SPEED_CAP: float = 6.2
+const PUSH_MOVE_SPEED_CAP: float = 6.6
 const HELD_ITEM_DIST: float = 0.95
 const HELD_ITEM_SIDE: float = 0.0
 const HELD_ITEM_HEIGHT: float = 1.0
@@ -28,8 +28,8 @@ const PICKUP_NEAR_DIST: float = 2.6
 @export var cart_turn_catchup_track_bonus: float = 16.0
 @export var cart_wobble_amplitude: float = 0.0
 @export var cart_vertical_bias_down: float = 420.0
-@export var cart_leash_min_m: float = 0.55
-@export var cart_leash_max_m: float = 2.08
+@export var cart_leash_min_m: float = 0.62
+@export var cart_leash_max_m: float = 2.22
 ## Additional forward pull when cart is behind player after a fast turn.
 @export var cart_behind_recovery_force: float = 220.0
 ## Jump-sync: cart launch vertical speed relative to player jump speed.
@@ -42,6 +42,8 @@ const PICKUP_NEAR_DIST: float = 2.6
 @export var cart_jump_sync_window_sec: float = 0.24
 ## Upward follow gain during jump-sync window (align cart vy to player vy).
 @export var cart_jump_vertical_follow_gain: float = 165.0
+## Small grace window so jump keys off player grounding even during push-contact jitter.
+@export var player_jump_coyote_sec: float = 0.12
 var gravity = ProjectSettings.get_setting("physics/3d/default_gravity")
 
 var is_pushing: bool = false
@@ -58,6 +60,7 @@ var _cart_grab_blend: float = 1.0
 ## 0 = no movement keys while pushing; 1 = full WASD deflection (used to soften leash when standing).
 var _cart_push_intent: float = 0.0
 var _cart_jump_sync_t: float = 0.0
+var _player_jump_coyote_t: float = 0.0
 var _active_client: Node3D = null
 var can_interact: bool = false
 
@@ -92,6 +95,7 @@ var _swap_hands_tw: Tween = null
 var _player_transparency_target: float = 0.0
 var _wait_t_prev_down: bool = false
 var inventory_list: Array[ItemResource] = []
+var _camera_steer_tip_debug: MeshInstance3D = null
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -108,6 +112,22 @@ func _ready() -> void:
 	if _collision_shape and _collision_shape.shape is CapsuleShape3D:
 		_capsule_shape = _collision_shape.shape
 		_stand_shape_height = _capsule_shape.height
+	if _camera != null and is_instance_valid(_camera):
+		var tip := MeshInstance3D.new()
+		tip.name = "CameraSteerTipDebug"
+		var m := SphereMesh.new()
+		m.radius = 0.12
+		m.height = 0.24
+		tip.mesh = m
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.albedo_color = Color(0.2, 0.9, 1.0, 0.95)
+		mat.emission_enabled = true
+		mat.emission = mat.albedo_color * 0.7
+		tip.material_override = mat
+		tip.position = Vector3(0.0, 0.0, -17.0)
+		_camera.add_child(tip)
+		_camera_steer_tip_debug = tip
 	_create_push_arms()
 	_refresh_hand_slot_hud()
 
@@ -159,17 +179,24 @@ func _physics_process(delta: float) -> void:
 	if Input.is_action_just_pressed("interact"):
 		_interact()
 
-	if not is_on_floor():
+	var player_grounded := is_on_floor()
+	if player_grounded:
+		_player_jump_coyote_t = player_jump_coyote_sec
+	else:
+		_player_jump_coyote_t = maxf(0.0, _player_jump_coyote_t - delta)
+
+	if not player_grounded:
 		velocity.y -= gravity * delta
 	if _cart_jump_sync_t > 0.0:
 		_cart_jump_sync_t = maxf(0.0, _cart_jump_sync_t - delta)
 
-	if Input.is_action_just_pressed("jump") and is_on_floor():
+	if Input.is_action_just_pressed("jump") and (player_grounded or _player_jump_coyote_t > 0.0):
 		if is_pushing and current_cart != null and is_instance_valid(current_cart):
 			# Trigger cart launch immediately on jump press so it "starts" the hop a touch earlier.
 			_sync_cart_jump_launch(cart_jump_lead_vertical_bonus)
 		velocity.y = JUMP_VELOCITY
 		_cart_jump_sync_t = cart_jump_sync_window_sec
+		_player_jump_coyote_t = 0.0
 
 	var want_stand := not Input.is_action_pressed("crouch")
 	var geometry_crouch := Input.is_action_pressed("crouch") or (want_stand and not _can_uncrouch_to_stand())
