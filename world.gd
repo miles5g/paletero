@@ -14,6 +14,7 @@ var _scanline_overlay: ColorRect = null
 var _compass_bar_label: Label = null
 var _compass_waypoint_label: Label = null
 var _compass_caret_label: Label = null
+var _money_ching_player: AudioStreamPlayer = null
 
 
 func _slot_stylebox() -> StyleBoxFlat:
@@ -659,6 +660,7 @@ func _ready() -> void:
 	_compass_caret_label = compass_caret
 
 	add_child(hud)
+	_setup_money_ching_audio()
 
 	# Base world environment values; celestial controller animates these over time.
 	var world_env := WorldEnvironment.new()
@@ -764,6 +766,63 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	_update_compass_hud()
+
+
+func _setup_money_ching_audio() -> void:
+	var ap := AudioStreamPlayer.new()
+	ap.name = "MoneyChingPlayer"
+	ap.stream = _build_money_ching_stream()
+	ap.volume_db = -10.0
+	ap.bus = &"Master"
+	add_child(ap)
+	_money_ching_player = ap
+
+
+func _build_money_ching_stream() -> AudioStreamWAV:
+	# Short synthetic “register ding” — no external .wav needed (PS2-ish, bright partials + fast decay).
+	var rate := 22050
+	var seconds := 0.22
+	var n := int(rate * seconds)
+	var data := PackedByteArray()
+	data.resize(n * 2)
+	var tau := PI * 2.0
+	for i in range(n):
+		var t := float(i) / float(rate)
+		var env := exp(-t * 12.0)
+		var s := (
+			0.42 * sin(t * tau * 2650.0)
+			+ 0.38 * sin(t * tau * 3950.0)
+			+ 0.12 * sin(t * tau * 880.0)
+		)
+		var sample := int(clampf(s * env * 2800.0, -32767.0, 32767.0))
+		data.encode_s16(i * 2, sample)
+	var stream := AudioStreamWAV.new()
+	stream.format = AudioStreamWAV.FORMAT_16_BITS
+	stream.mix_rate = rate
+	stream.stereo = false
+	stream.data = data
+	return stream
+
+
+func _play_money_ching(delta_usd: float) -> void:
+	if _money_ching_player == null or not is_instance_valid(_money_ching_player):
+		return
+	if absf(delta_usd) < 0.0005:
+		return
+	if delta_usd >= 0.0:
+		_money_ching_player.pitch_scale = 1.0
+		_money_ching_player.volume_db = -10.0
+	else:
+		_money_ching_player.pitch_scale = 0.78
+		_money_ching_player.volume_db = -14.0
+	_money_ching_player.play()
+
+
+func show_money_popup(delta_usd: float) -> void:
+	_play_money_ching(delta_usd)
+	var cycle := get_node_or_null("CelestialCycle") as Node
+	if cycle != null and cycle.has_method("show_money_popup"):
+		cycle.call("show_money_popup", delta_usd)
 
 func _spawn_player() -> CharacterBody3D:
 	var player = CharacterBody3D.new()

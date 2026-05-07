@@ -29,6 +29,8 @@ var _wait_cursor: Label = null
 var _sun_marker: Label = null
 var _clock_label: Label = null
 var _hint_label: Label = null
+var _bank_label: Label = null
+var _money_popup_layer: Control = null
 var _target_marker: Label = null
 var _clock_center: Vector2 = Vector2(90.0, 90.0)
 var _clock_radius: float = 58.0
@@ -444,6 +446,54 @@ func _build_debug_hud() -> void:
 	_hint_label.text = "[T] Wait"
 	_debug_layer.add_child(_hint_label)
 
+	_bank_label = Label.new()
+	_bank_label.name = "BankTotalLabel"
+	_bank_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_bank_label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	_bank_label.add_theme_font_size_override("font_size", 12)
+	_bank_label.add_theme_color_override("font_color", Color(0.82, 1.0, 0.76, 0.96))
+	_bank_label.text = "$0.00"
+	_debug_layer.add_child(_bank_label)
+
+	_money_popup_layer = Control.new()
+	_money_popup_layer.name = "MoneyPopupLayer"
+	_money_popup_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_money_popup_layer.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_debug_layer.add_child(_money_popup_layer)
+
+
+func show_money_popup(delta_usd: float) -> void:
+	if _money_popup_layer == null or _bank_label == null:
+		return
+	if absf(delta_usd) < 0.0005:
+		return
+	var popup := Label.new()
+	popup.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	popup.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	popup.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	var sign := "+" if delta_usd >= 0.0 else "-"
+	popup.text = "%s$%.2f" % [sign, absf(delta_usd)]
+	popup.add_theme_font_size_override("font_size", 13)
+	popup.add_theme_color_override(
+		"font_color",
+		Color(0.56, 1.0, 0.56, 0.96) if delta_usd >= 0.0 else Color(1.0, 0.56, 0.56, 0.96)
+	)
+	var popup_w := 128.0
+	popup.size = Vector2(popup_w, 22.0)
+	var start_y := _bank_label.position.y + _bank_label.size.y + 4.0
+	var start_x := _bank_label.position.x + _bank_label.size.x - popup_w
+	popup.position = Vector2(start_x, start_y)
+	_money_popup_layer.add_child(popup)
+	var tw := create_tween()
+	tw.set_trans(Tween.TRANS_SINE)
+	tw.set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(popup, "position:y", start_y - 14.0, 0.55)
+	tw.parallel().tween_property(popup, "modulate:a", 0.0, 0.55)
+	tw.finished.connect(func() -> void:
+		if is_instance_valid(popup):
+			popup.queue_free()
+	)
+
 
 func _build_clock_ring() -> void:
 	if _clock_canvas == null:
@@ -494,6 +544,14 @@ func _update_clock_hud() -> void:
 	_clock_label.position = clock_center_screen - _clock_label.size * 0.5
 	_hint_label.position = clock_center_screen + Vector2(-120.0, 66.0 * _clock_canvas.scale.y)
 	_hint_label.size = Vector2(280.0, 52.0)
+	if _bank_label:
+		_bank_label.position = _hint_label.position + Vector2(0.0, _hint_label.size.y + 2.0)
+		_bank_label.size = Vector2(280.0, 22.0)
+		var player := get_parent().get_node_or_null("Player") as CharacterBody3D
+		var bank_amt := 0.0
+		if player != null and is_instance_valid(player):
+			bank_amt = float(player.get("bank_usd"))
+		_bank_label.text = "$%.2f" % bank_amt
 	if _target_marker:
 		_target_marker.visible = _is_wait_selecting or _is_wait_advancing
 		var target_angle := deg_to_rad(_wait_target_angle_deg - 180.0)

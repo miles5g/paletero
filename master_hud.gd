@@ -1168,7 +1168,6 @@ func update_total_manifest_weight() -> void:
 				if it is ItemResource:
 					var q := float(it.quantity)
 					total_w += it.weight_lbs * q
-					total_money += it.value_usd * q
 	# Player bank ledger is the cash sink/source for real transactions (sales).
 	if _player_owner != null and is_instance_valid(_player_owner):
 		total_money += float(_player_owner.get("bank_usd"))

@@ -439,7 +439,7 @@ func _try_sell_to_client() -> bool:
 	if res == null:
 		return false
 	var payout := res.value_usd * float(maxi(1, res.quantity))
-	bank_usd += payout
+	_apply_bank_delta(payout)
 	if hand_item == _left_hand_item:
 		_left_hand_item.queue_free()
 		_left_hand_item = null
@@ -450,6 +450,13 @@ func _try_sell_to_client() -> bool:
 	_refresh_manifest_after_sale()
 	print("Sale complete: +$%.2f for %s" % [payout, res.item_name])
 	return true
+
+
+func _apply_bank_delta(delta_usd: float) -> void:
+	bank_usd += delta_usd
+	var w := get_parent()
+	if w != null and w.has_method("show_money_popup"):
+		w.show_money_popup(delta_usd)
 
 
 func _refresh_manifest_after_sale() -> void:
