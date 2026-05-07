@@ -696,8 +696,8 @@ func _ready() -> void:
 	var cart = RigidBody3D.new()
 	cart.name = "Cart"
 	cart.mass = 12.0
-	cart.linear_damp = 0.3
-	cart.gravity_scale = 0.72
+	cart.linear_damp = 0.32
+	cart.gravity_scale = 1.18
 	# Lighter cart: less angular drag so it feels a bit floatier while still settling.
 	cart.angular_damp = 4.8
 	cart.physics_material_override = PhysicsMaterial.new()

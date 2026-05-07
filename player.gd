@@ -14,28 +14,34 @@ const PICKUP_NEAR_DIST: float = 2.6
 
 @export var push_force: float = 2.0
 @export var mouse_sensitivity: float = 0.0025
-## Virtual hitch: pulls cart toward a point in front of the player (CharacterBody3D + Jolt).
-@export var hitch_spring: float = 2650.0
-@export var hitch_damping: float = 118.0
-## Vertical pull vs horizontal (stiffer Y keeps the hitch from sagging visually).
-@export var hitch_vertical_spring: float = 1100.0
-## How fast the hitch “looks” direction catches your facing (higher = stiffer in front).
-@export var hitch_forward_track: float = 14.0
-## Sideways oscillation of the target (meters); 0 = rigid arms / fixed line.
-@export var hitch_wobble_amplitude: float = 0.0
-## World-space distance from player to hitch target on the ground (fixed while grabbed).
-@export var hitch_nominal_distance: float = 2.05
-## Extra XZ force toward player horizontal velocity (tighter “rope” when starting/stopping).
-@export var hitch_velocity_match: float = 58.0
+## Cart planar coupling while pushing: weak spring to leash point + velocity tracking (no mega-springs).
+@export var cart_couple_stiffness: float = 380.0
+@export var cart_velocity_gain_moving: float = 52.0
+@export var cart_velocity_gain_idle: float = 22.0
+@export var cart_max_planar_force: float = 520.0
+@export var cart_planar_err_cap: float = 1.35
+@export var cart_grab_blend_sec: float = 0.28
+@export var cart_idle_correction_scale: float = 0.16
+@export var cart_forward_track_moving: float = 9.0
+@export var cart_forward_track_idle: float = 3.2
+@export var cart_wobble_amplitude: float = 0.0
+@export var cart_vertical_bias_down: float = 420.0
+@export var cart_vertical_bias_up: float = 160.0
+@export var cart_leash_min_m: float = 0.55
+@export var cart_leash_max_m: float = 2.08
 var gravity = ProjectSettings.get_setting("physics/3d/default_gravity")
 
 var is_pushing: bool = false
 var current_cart: RigidBody3D = null
-var _hitch_distance: float = 2.0
-## Smoothed horizontal forward used for “in front” target (lags body/camera yaw).
-var _hitch_forward_smooth: Vector3 = Vector3.ZERO
-## Cart Y offset from player at grab (preserves relative height).
-var _hitch_dy: float = 0.0
+var _cart_leash_m: float = 2.0
+## Smoothed horizontal forward for leash anchor (lags body yaw).
+var _cart_forward_smooth: Vector3 = Vector3.ZERO
+## Cart Y offset vs player at grab (preserves relative height).
+var _cart_dy: float = 0.0
+## 0→1 after grab; ramps planar coupling in.
+var _cart_grab_blend: float = 1.0
+## 0 = no movement keys while pushing; 1 = full WASD deflection (used to soften leash when standing).
+var _cart_push_intent: float = 0.0
 var can_interact: bool = false
 
 var _mesh_instance: MeshInstance3D
@@ -156,6 +162,7 @@ func _physics_process(delta: float) -> void:
 	_update_crouch_capsule(geometry_crouch)
 
 	var input_dir := Input.get_vector("move_left", "move_right", "move_forward", "move_backward")
+	_cart_push_intent = clampf(input_dir.length(), 0.0, 1.0) if is_pushing else 0.0
 	var direction := (transform.basis * Vector3(input_dir.x, 0, input_dir.y)).normalized()
 
 	if direction:
@@ -172,7 +179,8 @@ func _physics_process(delta: float) -> void:
 
 	if is_pushing and current_cart != null:
 		current_cart.sleeping = false
-		_apply_hitch_forces(delta)
+		_cart_grab_blend = minf(1.0, _cart_grab_blend + delta / maxf(0.04, cart_grab_blend_sec))
+		_apply_cart_coupling(delta)
 		_update_push_arms_visual()
 
 	for i in get_slide_collision_count():
@@ -632,13 +640,24 @@ func _attach_to_cart(cart: RigidBody3D) -> void:
 	var w := get_parent()
 	if w != null and w.has_method("set_grab_prompts_visible"):
 		w.set_grab_prompts_visible(false)
-	_hitch_distance = hitch_nominal_distance
-	_hitch_dy = cart.global_position.y - global_position.y
+	_cart_dy = cart.global_position.y - global_position.y
+	_cart_grab_blend = 0.0
 	var face := -global_transform.basis.z
 	face.y = 0.0
 	if face.length_squared() < 1e-5:
 		face = Vector3(0, 0, -1)
-	_hitch_forward_smooth = face.normalized()
+	face = face.normalized()
+	# Snap leash length to actual cart offset. A fixed ~2m target ahead of the feet while the cart
+	# is still ~1m away injects massive forward error every frame → rocket behavior.
+	var rel := cart.global_position - global_position
+	rel.y = 0.0
+	var along := rel.dot(face)
+	var sep := rel.length()
+	if along > 0.12:
+		_cart_leash_m = clampf(along, cart_leash_min_m, cart_leash_max_m)
+	else:
+		_cart_leash_m = clampf(sep, cart_leash_min_m, cart_leash_max_m)
+	_cart_forward_smooth = face
 	cart.freeze = false
 	cart.sleeping = false
 	cart.can_sleep = false
@@ -765,44 +784,63 @@ func _update_push_arms_visual() -> void:
 	_stretch_arm_between(_push_arm_r, right_shoulder, right_elbow)
 	_stretch_arm_between(_push_forearm_r, right_elbow, right_target)
 
-func _apply_hitch_forces(delta: float) -> void:
+
+func get_cart_push_intent() -> float:
+	return _cart_push_intent
+
+
+func _apply_cart_coupling(_delta: float) -> void:
 	if current_cart == null or not is_instance_valid(current_cart):
 		return
+	var cart := current_cart
 	var face := -global_transform.basis.z
 	face.y = 0.0
 	if face.length_squared() < 1e-5:
-		face = _hitch_forward_smooth
+		face = _cart_forward_smooth
+	if face.length_squared() < 1e-5:
+		face = Vector3(0.0, 0.0, -1.0)
 	face = face.normalized()
-	var alpha := 1.0 - exp(-hitch_forward_track * delta)
-	_hitch_forward_smooth = _hitch_forward_smooth.lerp(face, alpha)
-	if _hitch_forward_smooth.length_squared() < 1e-5:
-		_hitch_forward_smooth = face
+	var track_eff := lerpf(cart_forward_track_idle, cart_forward_track_moving, _cart_push_intent)
+	var alpha := 1.0 - exp(-track_eff * _delta)
+	_cart_forward_smooth = _cart_forward_smooth.lerp(face, alpha)
+	if _cart_forward_smooth.length_squared() < 1e-5:
+		_cart_forward_smooth = face
 	else:
-		_hitch_forward_smooth = _hitch_forward_smooth.normalized()
-	var right := Vector3(-_hitch_forward_smooth.z, 0.0, _hitch_forward_smooth.x).normalized()
-	var wob := sin(Time.get_ticks_msec() * 0.0017) * hitch_wobble_amplitude
-	var target_xz := global_position + _hitch_forward_smooth * _hitch_distance + right * wob
-	var desired := Vector3(target_xz.x, global_position.y + _hitch_dy, target_xz.z)
-	var err: Vector3 = desired - current_cart.global_position
-	# Hard guard: if cart drifts behind, add strong forward pull to recover control quickly.
-	var to_cart_xz := current_cart.global_position - global_position
-	to_cart_xz.y = 0.0
-	var behind_dist := maxf(0.0, -to_cart_xz.dot(_hitch_forward_smooth))
-	var behind_correction := _hitch_forward_smooth * (behind_dist * hitch_spring * 0.9)
-	var v := current_cart.linear_velocity
-	var damp_h := Vector3(v.x, 0.0, v.z) * hitch_damping
-	var damp_v := Vector3(0.0, v.y, 0.0) * hitch_damping * 0.42
-	var v_cart_xz := Vector3(v.x, 0.0, v.z)
+		_cart_forward_smooth = _cart_forward_smooth.normalized()
+
+	var right := Vector3(-_cart_forward_smooth.z, 0.0, _cart_forward_smooth.x).normalized()
+	var wob := sin(Time.get_ticks_msec() * 0.0017) * cart_wobble_amplitude
+	var anchor_xz := global_position + _cart_forward_smooth * _cart_leash_m + right * wob
+	var desired := Vector3(anchor_xz.x, global_position.y + _cart_dy, anchor_xz.z)
+	var err := desired - cart.global_position
+
+	var err_xz := Vector3(err.x, 0.0, err.z)
+	var cap := cart_planar_err_cap
+	if err_xz.length_squared() > cap * cap:
+		err_xz = err_xz.normalized() * cap
+
+	var grab_w := _cart_grab_blend * _cart_grab_blend * (3.0 - 2.0 * _cart_grab_blend)
+	var idle_mul := lerpf(cart_idle_correction_scale, 1.0, _cart_push_intent)
+
+	var f_pos := Vector3(err_xz.x, 0.0, err_xz.z) * cart_couple_stiffness * grab_w * idle_mul
+
+	var v_cart_xz := Vector3(cart.linear_velocity.x, 0.0, cart.linear_velocity.z)
 	var v_player_xz := Vector3(velocity.x, 0.0, velocity.z)
-	var match_xz := (v_player_xz - v_cart_xz) * hitch_velocity_match
-	current_cart.apply_central_force(
-		Vector3(err.x, 0.0, err.z) * hitch_spring
-		+ Vector3(0.0, err.y, 0.0) * hitch_vertical_spring
-		+ Vector3(behind_correction.x, 0.0, behind_correction.z)
-		+ Vector3(match_xz.x, 0.0, match_xz.z)
-		- damp_h
-		- damp_v
-	)
+	var vel_gain := lerpf(cart_velocity_gain_idle, cart_velocity_gain_moving, _cart_push_intent) * grab_w
+	var f_vel := (v_player_xz - v_cart_xz) * vel_gain
+
+	var f_hz := f_pos + f_vel
+	var f_cap := cart_max_planar_force * grab_w
+	if f_hz.length() > f_cap:
+		f_hz = f_hz.normalized() * f_cap
+
+	var f_y := 0.0
+	if err.y > 0.02:
+		f_y = -minf(err.y, 0.12) * cart_vertical_bias_down * grab_w
+	elif err.y < -0.06:
+		f_y = -err.y * cart_vertical_bias_up * grab_w * 0.35
+
+	cart.apply_central_force(Vector3(f_hz.x, f_y, f_hz.z))
 
 func _detach_from_cart() -> void:
 	var cart := current_cart

@@ -225,8 +225,6 @@ func _build_map_proxy_geometry(root: Node3D) -> void:
 	var road_mat := StandardMaterial3D.new()
 	road_mat.albedo_color = Color(0.78, 0.78, 0.78)
 	road_mat.roughness = 0.92
-	road_mat.polygon_offset_factor = 2.0
-	road_mat.polygon_offset_units = 2.0
 	var plinth_mat := StandardMaterial3D.new()
 	plinth_mat.albedo_color = Color(0.62, 0.62, 0.62)
 	plinth_mat.roughness = 0.94
