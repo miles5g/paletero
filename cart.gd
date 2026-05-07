@@ -229,7 +229,13 @@ func _apply_yaw_toward_camera(state: PhysicsDirectBodyState3D, player: Character
 func _apply_grabbed_grounding(state: PhysicsDirectBodyState3D) -> void:
 	if state.get_contact_count() <= 0:
 		return
-	if state.linear_velocity.y < falling_velocity_threshold:
+	var vy := state.linear_velocity.y
+	# Real falls: let gravity act unassisted.
+	if vy < falling_velocity_threshold:
+		return
+	# Upward motion (jump, curb pop): do not add extra downward hold,
+	# or we will immediately cancel loft and hide jump sync.
+	if vy > 0.0:
 		return
 	# Downward bias is applied only when supported so real drops remain ballistic.
 	state.apply_central_force(Vector3.DOWN * grabbed_downward_bias)

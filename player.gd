@@ -33,9 +33,11 @@ const PICKUP_NEAR_DIST: float = 2.6
 ## Additional forward pull when cart is behind player after a fast turn.
 @export var cart_behind_recovery_force: float = 220.0
 ## Jump-sync: cart launch vertical speed relative to player jump speed.
-@export var cart_jump_vertical_scale: float = 1.0
+@export var cart_jump_vertical_scale: float = 1.4
 ## Jump-sync: blend cart XZ momentum toward player XZ at jump time.
 @export var cart_jump_momentum_blend: float = 0.72
+## Tiny pre-hop bonus so cart starts lifting slightly ahead of player jump (arcade feel).
+@export var cart_jump_lead_vertical_bonus: float = 2.0
 ## Seconds after jump where cart vertical follow overrides downward hold.
 @export var cart_jump_sync_window_sec: float = 0.24
 ## Upward follow gain during jump-sync window (align cart vy to player vy).
@@ -162,11 +164,12 @@ func _physics_process(delta: float) -> void:
 	if _cart_jump_sync_t > 0.0:
 		_cart_jump_sync_t = maxf(0.0, _cart_jump_sync_t - delta)
 
-	var did_jump := false
 	if Input.is_action_just_pressed("jump") and is_on_floor():
+		if is_pushing and current_cart != null and is_instance_valid(current_cart):
+			# Trigger cart launch immediately on jump press so it "starts" the hop a touch earlier.
+			_sync_cart_jump_launch(cart_jump_lead_vertical_bonus)
 		velocity.y = JUMP_VELOCITY
 		_cart_jump_sync_t = cart_jump_sync_window_sec
-		did_jump = true
 
 	var want_stand := not Input.is_action_pressed("crouch")
 	var geometry_crouch := Input.is_action_pressed("crouch") or (want_stand and not _can_uncrouch_to_stand())
@@ -199,8 +202,6 @@ func _physics_process(delta: float) -> void:
 
 	if is_pushing and current_cart != null:
 		current_cart.sleeping = false
-		if did_jump:
-			_sync_cart_jump_launch()
 		_cart_grab_blend = minf(1.0, _cart_grab_blend + delta / maxf(0.04, cart_grab_blend_sec))
 		_apply_cart_coupling(delta)
 		_update_push_arms_visual()
@@ -474,7 +475,7 @@ func _apply_bank_delta(delta_usd: float) -> void:
 		w.show_money_popup(delta_usd)
 
 
-func _sync_cart_jump_launch() -> void:
+func _sync_cart_jump_launch(lead_bonus: float = 0.0) -> void:
 	if current_cart == null or not is_instance_valid(current_cart):
 		return
 	var v := current_cart.linear_velocity
@@ -483,7 +484,7 @@ func _sync_cart_jump_launch() -> void:
 	var launch_xz := cart_xz.lerp(player_xz, clampf(cart_jump_momentum_blend, 0.0, 1.0))
 	v.x = launch_xz.x
 	v.z = launch_xz.z
-	v.y = maxf(v.y, JUMP_VELOCITY * cart_jump_vertical_scale)
+	v.y = maxf(v.y, JUMP_VELOCITY * cart_jump_vertical_scale + maxf(0.0, lead_bonus))
 	current_cart.linear_velocity = v
 
 
