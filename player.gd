@@ -203,7 +203,11 @@ func _physics_process(delta: float) -> void:
 	if _cart_jump_sync_t > 0.0:
 		_cart_jump_sync_t = maxf(0.0, _cart_jump_sync_t - delta)
 
-	if Input.is_action_just_pressed("jump") and (player_grounded or _player_jump_coyote_t > 0.0):
+	var can_player_jump := player_grounded or _player_jump_coyote_t > 0.0
+	var can_cart_jump := true
+	if is_pushing:
+		can_cart_jump = current_cart != null and is_instance_valid(current_cart) and current_cart.get_contact_count() > 0
+	if Input.is_action_just_pressed("jump") and can_player_jump and can_cart_jump:
 		if is_pushing and current_cart != null and is_instance_valid(current_cart):
 			# Trigger cart launch immediately on jump press so it "starts" the hop a touch earlier.
 			_sync_cart_jump_launch(cart_jump_lead_vertical_bonus)
@@ -243,12 +247,14 @@ func _physics_process(delta: float) -> void:
 
 	if is_pushing and current_cart != null:
 		current_cart.sleeping = false
-		# Absolute pre-clamp: prevent any frame from starting behind the hard-stop.
-		_enforce_cart_hard_stop()
+		if _cart_push_intent > 0.01:
+			# Only enforce pull-related hard-stop while the player is actively pressing movement.
+			_enforce_cart_hard_stop()
 		_cart_grab_blend = minf(1.0, _cart_grab_blend + delta / maxf(0.04, cart_grab_blend_sec))
 		_apply_cart_coupling(delta)
-		# Absolute post-clamp: catches extreme camera flicks in the same tick.
-		_enforce_cart_hard_stop()
+		if _cart_push_intent > 0.01:
+			# Post-clamp is also movement-intent gated to keep idle behavior fully neutral.
+			_enforce_cart_hard_stop()
 		_update_push_arms_visual()
 
 	for i in get_slide_collision_count():
@@ -433,6 +439,23 @@ func _apply_punch_camera_jitter(side: float) -> void:
 	_cam_jitter_tw.tween_property(_camera, "rotation_degrees", base_rot + jitter, 0.035)
 	_cam_jitter_tw.set_ease(Tween.EASE_IN)
 	_cam_jitter_tw.tween_property(_camera, "rotation_degrees", base_rot, 0.07)
+
+
+func on_cart_heavy_impact(speed: float) -> void:
+	if _camera == null:
+		return
+	if _cam_jitter_tw != null and _cam_jitter_tw.is_valid():
+		_cam_jitter_tw.kill()
+	var base_rot := _camera.rotation_degrees
+	var amp := clampf((speed - 5.0) * 0.22, 0.45, 1.9)
+	var side := randf_range(-1.0, 1.0)
+	var jitter := Vector3(-0.18 * amp, 0.0, side * 0.65 * amp)
+	_cam_jitter_tw = create_tween()
+	_cam_jitter_tw.set_trans(Tween.TRANS_SINE)
+	_cam_jitter_tw.set_ease(Tween.EASE_OUT)
+	_cam_jitter_tw.tween_property(_camera, "rotation_degrees", base_rot + jitter, 0.03)
+	_cam_jitter_tw.set_ease(Tween.EASE_IN)
+	_cam_jitter_tw.tween_property(_camera, "rotation_degrees", base_rot, 0.11)
 
 func punch_left() -> void:
 	if not _can_punch():
@@ -940,6 +963,9 @@ func get_cart_push_intent() -> float:
 
 func _apply_cart_coupling(_delta: float) -> void:
 	if current_cart == null or not is_instance_valid(current_cart):
+		return
+	# No movement key -> no pull force application (cart remains neutral/free rolling).
+	if _cart_push_intent <= 0.01:
 		return
 	var cart := current_cart
 	# 1) Build a stable forward reference used for leash anchoring.

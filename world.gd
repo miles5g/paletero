@@ -14,6 +14,7 @@ var _compass_bar_label: Label = null
 var _compass_waypoint_label: Label = null
 var _compass_caret_label: Label = null
 var _money_ching_player: AudioStreamPlayer = null
+var _cart_impact_player: AudioStreamPlayer = null
 
 
 func _slot_stylebox() -> StyleBoxFlat:
@@ -170,6 +171,8 @@ func _make_curb_material(albedo_tex: Texture2D, uv_scale: Vector3) -> StandardMa
 func _add_street_box(parent: Node3D, p_name: String, size: Vector3, center_pos: Vector3, mat: Material) -> void:
 	var body := StaticBody3D.new()
 	body.name = p_name
+	# Structural colliders live on both 1 (legacy/world) and 2 (impact routing).
+	body.collision_layer = (1 << 0) | (1 << 1)
 	var mi := MeshInstance3D.new()
 	var box := BoxMesh.new()
 	box.size = size
@@ -196,6 +199,7 @@ func _add_street_ramp(
 ) -> void:
 	var body := StaticBody3D.new()
 	body.name = p_name
+	body.collision_layer = (1 << 0) | (1 << 1)
 	var mi := MeshInstance3D.new()
 	var box := BoxMesh.new()
 	box.size = size
@@ -249,7 +253,7 @@ func _build_town_square_plinth_and_roads(
 	var comb := CSGCombiner3D.new()
 	comb.name = "TownSquarePlinth"
 	comb.use_collision = true
-	comb.collision_layer = 1
+	comb.collision_layer = (1 << 0) | (1 << 1)
 	comb.layers = 1 << (_MAP_STRUCTURAL_LAYER - 1)
 	comb.position = Vector3(0.0, plinth_cy, 0.0)
 	var outer := CSGBox3D.new()
@@ -637,6 +641,7 @@ func _ready() -> void:
 
 	add_child(hud)
 	_setup_money_ching_audio()
+	_setup_cart_impact_audio()
 
 	# Base world environment values; celestial controller animates these over time.
 	var world_env := WorldEnvironment.new()
@@ -675,16 +680,19 @@ func _ready() -> void:
 	var cart = RigidBody3D.new()
 	cart.name = "Cart"
 	cart.mass = 12.0
-	cart.linear_damp = 0.32
+	# Collide with both gameplay/default (1) and structural (2) layers.
+	cart.collision_layer = 1
+	cart.collision_mask = (1 << 0) | (1 << 1)
+	cart.linear_damp = 2.6
 	cart.gravity_scale = 1.0
-	# Lighter cart: less angular drag so it feels a bit floatier while still settling.
-	cart.angular_damp = 4.8
+	# Weighted-sled: heavy rotational resistance so it won't spin like a toy.
+	cart.angular_damp = 9.5
 	cart.physics_material_override = PhysicsMaterial.new()
 	cart.physics_material_override.friction = 0.18
 	cart.physics_material_override.bounce = 0.08
 	cart.center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
-	# Box is 1m tall centered at origin: put mass well below center, slightly toward the rear wheels.
-	cart.center_of_mass = Vector3(0.0, -0.44, -0.18)
+	# Weighted-sled anchor: center of mass significantly below floor/axle zone.
+	cart.center_of_mass = Vector3(0.0, -0.72, -0.2)
 	cart.set_script(load("res://cart.gd"))
 	cart.position = Vector3(0, 1, -5) # 5 meters in front of center
 	
@@ -754,6 +762,51 @@ func _setup_money_ching_audio() -> void:
 	_money_ching_player = ap
 
 
+func _setup_cart_impact_audio() -> void:
+	var ap := AudioStreamPlayer.new()
+	ap.name = "CartImpactPlayer"
+	ap.stream = _build_cart_impact_stream()
+	ap.volume_db = -9.0
+	ap.bus = &"Master"
+	add_child(ap)
+	_cart_impact_player = ap
+
+
+func _build_cart_impact_stream() -> AudioStreamWAV:
+	# Short heavy "thud": low-mid burst with fast decay.
+	var rate := 22050
+	var seconds := 0.18
+	var n := int(rate * seconds)
+	var data := PackedByteArray()
+	data.resize(n * 2)
+	var tau := PI * 2.0
+	for i in range(n):
+		var t := float(i) / float(rate)
+		var env := exp(-t * 18.0)
+		var s := (
+			0.78 * sin(t * tau * 120.0)
+			+ 0.26 * sin(t * tau * 210.0)
+			+ 0.12 * sin(t * tau * 470.0)
+		)
+		var sample := int(clampf(s * env * 7000.0, -32767.0, 32767.0))
+		data.encode_s16(i * 2, sample)
+	var stream := AudioStreamWAV.new()
+	stream.format = AudioStreamWAV.FORMAT_16_BITS
+	stream.mix_rate = rate
+	stream.stereo = false
+	stream.data = data
+	return stream
+
+
+func play_cart_impact_feedback(speed: float) -> void:
+	if _cart_impact_player == null or not is_instance_valid(_cart_impact_player):
+		return
+	var w := clampf((speed - 5.0) / 8.0, 0.0, 1.0)
+	_cart_impact_player.pitch_scale = lerpf(0.86, 1.02, w)
+	_cart_impact_player.volume_db = lerpf(-13.0, -6.0, w)
+	_cart_impact_player.play()
+
+
 func _build_money_ching_stream() -> AudioStreamWAV:
 	# Short synthetic “register ding” — no external .wav needed (PS2-ish, bright partials + fast decay).
 	var rate := 22050
@@ -805,7 +858,8 @@ func _spawn_player() -> CharacterBody3D:
 	player.name = "Player"
 	player.position = Vector3(0, 1, 0)
 	player.collision_layer = 1
-	player.collision_mask = 1
+	# Include structural layer so sidewalks/roads still collide after Layer-2 move.
+	player.collision_mask = (1 << 0) | (1 << 1)
 	
 	# Give the player a script (we will create this file next)
 	player.set_script(load("res://player.gd"))

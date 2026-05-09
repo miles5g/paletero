@@ -14,25 +14,34 @@ extends RigidBody3D
 @export var yaw_align_idle_scale: float = 0.35
 ## Debug: draw camera/cart steering sources and connecting rope (visual only).
 @export var steer_debug_visible: bool = true
-@export var steer_source_cart_forward: float = 2.0
-@export var steer_source_cart_height: float = 0.4
-## Hard-stop maximum rope length between source A (camera) and B (cart).
-@export var steer_rope_max_len: float = 2.5
+@export var steer_source_cart_forward: float = 0.78
+@export var steer_source_cart_height: float = 0.16
+## Maximum allowed distance from source A to source C.
+@export var steer_source_c_max_dist: float = 10
+## Hard-lock cart front anchor to source C while grabbed.
+@export var steer_lock_front_to_c: bool = true
+## Limit per-step planar lock correction to avoid violent grab snaps.
+@export var steer_lock_max_step_m: float = 0.45
+## Safety floor for cart center while lock is active.
+@export var steer_lock_min_center_y: float = 0.45
+## Show live yellow connector length text near rope midpoint.
+@export var steer_rope_length_label_visible: bool = true
 
-## --- Angular stability (curbs / impacts) ---
-@export var roll_pitch_damping: float = 8.0
-
-## --- Grounding when grabbed (contacts only; no forward-speed “boost”) ---
-@export var grabbed_downward_bias: float = 220.0
-## Below this vertical speed (m/s), treat as supported / not in free fall.
-@export var falling_velocity_threshold: float = -3.2
+## --- Heavy impact feedback (simple layer-2 structural check) ---
+@export var impact_layer_2_min_speed: float = 5.8
+@export var impact_feedback_cooldown_sec: float = 0.18
 
 var _handle_zone: Area3D
 var _interaction_area: Area3D
 ## Snapshot from spawn (`world.gd`); physics mass stays fixed regardless of inventory.
 var _base_mass: float = 1.0
 var _steer_source_cart_debug: MeshInstance3D = null
+var _steer_source_cart_front_debug: MeshInstance3D = null
 var _steer_rope_debug: MeshInstance3D = null
+var _steer_rope_length_label: Label3D = null
+var _steer_rope_cb_debug: MeshInstance3D = null
+var _steer_rope_cb_length_label: Label3D = null
+var _impact_feedback_cd_t: float = 0.0
 
 var inventory_list: Array[ItemResource] = []
 
@@ -73,6 +82,21 @@ func _ready() -> void:
 		add_child(src)
 		_steer_source_cart_debug = src
 
+		var src_front := MeshInstance3D.new()
+		src_front.name = "CartFrontCenterDebug"
+		var sf_mesh := SphereMesh.new()
+		sf_mesh.radius = 0.09
+		sf_mesh.height = 0.18
+		src_front.mesh = sf_mesh
+		var sf_mat := StandardMaterial3D.new()
+		sf_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		sf_mat.albedo_color = Color(0.2, 1.0, 0.3, 0.96)
+		sf_mat.emission_enabled = true
+		sf_mat.emission = sf_mat.albedo_color * 0.65
+		src_front.material_override = sf_mat
+		add_child(src_front)
+		_steer_source_cart_front_debug = src_front
+
 		var rope := MeshInstance3D.new()
 		rope.name = "CartRopeDebug"
 		var r_mesh := CylinderMesh.new()
@@ -88,6 +112,44 @@ func _ready() -> void:
 		rope.material_override = r_mat
 		add_child(rope)
 		_steer_rope_debug = rope
+
+		var len_label := Label3D.new()
+		len_label.name = "CartRopeLenDebug"
+		len_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		len_label.no_depth_test = true
+		len_label.font_size = 36
+		len_label.modulate = Color(1.0, 0.92, 0.25, 0.98)
+		len_label.outline_size = 6
+		len_label.text = "0.00m"
+		add_child(len_label)
+		_steer_rope_length_label = len_label
+
+		var rope_cb := MeshInstance3D.new()
+		rope_cb.name = "CartRopeCBDebug"
+		var cb_mesh := CylinderMesh.new()
+		cb_mesh.top_radius = 0.03
+		cb_mesh.bottom_radius = 0.03
+		cb_mesh.height = 1.0
+		rope_cb.mesh = cb_mesh
+		var cb_mat := StandardMaterial3D.new()
+		cb_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		cb_mat.albedo_color = Color(0.55, 1.0, 0.55, 0.96)
+		cb_mat.emission_enabled = true
+		cb_mat.emission = cb_mat.albedo_color * 0.5
+		rope_cb.material_override = cb_mat
+		add_child(rope_cb)
+		_steer_rope_cb_debug = rope_cb
+
+		var cb_len_label := Label3D.new()
+		cb_len_label.name = "CartRopeCBLenDebug"
+		cb_len_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		cb_len_label.no_depth_test = true
+		cb_len_label.font_size = 32
+		cb_len_label.modulate = Color(0.55, 1.0, 0.55, 0.98)
+		cb_len_label.outline_size = 6
+		cb_len_label.text = "0.00m"
+		add_child(cb_len_label)
+		_steer_rope_cb_length_label = cb_len_label
 
 	_interaction_area = Area3D.new()
 	_interaction_area.name = "InteractionArea"
@@ -215,13 +277,19 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	# Keeping these responsibilities split avoids duplicate/competing force stacks.
 	var player := _grabber_player()
 	var av := state.angular_velocity
-	# Dampen roll/pitch first so curb hits do not cascade into wobble/flip loops.
-	state.apply_torque(Vector3(-av.x, 0.0, -av.z) * roll_pitch_damping)
+	var push_intent := 1.0
+	if player != null and player.has_method("get_cart_push_intent"):
+		push_intent = player.get_cart_push_intent()
+	if player != null and steer_lock_front_to_c and push_intent > 0.01:
+		# Keep C-lock active only while movement is pressed; idle remains free/neutral.
+		_enforce_cart_front_lock_to_c(state, player)
 	# Continuous yaw damping keeps angular velocity bounded between heading updates.
 	state.apply_torque(Vector3.UP * (-av.y * yaw_angular_damping))
+	if _impact_feedback_cd_t > 0.0:
+		_impact_feedback_cd_t = maxf(0.0, _impact_feedback_cd_t - state.step)
+	_maybe_emit_heavy_impact_feedback(state, player)
 	if player != null:
 		_apply_yaw_toward_camera(state, player)
-		_apply_grabbed_grounding(state)
 		_update_steer_debug_sources(state, player)
 	elif steer_debug_visible:
 		_update_steer_debug_sources(state, null)
@@ -240,6 +308,12 @@ func _grabber_player() -> CharacterBody3D:
 
 
 func _apply_yaw_toward_camera(state: PhysicsDirectBodyState3D, player: CharacterBody3D) -> void:
+	var intent := 1.0
+	if player.has_method("get_cart_push_intent"):
+		intent = player.get_cart_push_intent()
+	# No movement key -> no yaw steering influence.
+	if intent <= 0.01:
+		return
 	var cam: Camera3D = null
 	for c in player.get_children():
 		if c is Camera3D:
@@ -248,8 +322,8 @@ func _apply_yaw_toward_camera(state: PhysicsDirectBodyState3D, player: Character
 	if cam == null:
 		return
 	# Steering target is the rope direction: cart source B pulled toward camera source A.
-	var cart_front_world := global_transform.origin \
-		+ (-global_transform.basis.z) * steer_source_cart_forward
+	var cart_front_world := state.transform.origin \
+		+ (-state.transform.basis.z) * steer_source_cart_forward
 	var src_a_valid := false
 	var src_a := Vector3.ZERO
 	var tip := cam.get_node_or_null("CameraSteerTipDebug") as MeshInstance3D
@@ -264,11 +338,13 @@ func _apply_yaw_toward_camera(state: PhysicsDirectBodyState3D, player: Character
 			src_a_valid = true
 	if not src_a_valid:
 		return
-	var rope_dir_full := src_a - cart_front_world
-	var rope_len_full := rope_dir_full.length()
-	if rope_len_full > maxf(0.2, steer_rope_max_len):
-		src_a = cart_front_world + (rope_dir_full / rope_len_full) * steer_rope_max_len
-	var rope_dir := src_a - cart_front_world
+	var a_to_c := cart_front_world - src_a
+	var c_max := maxf(0.2, steer_source_c_max_dist)
+	if a_to_c.length() > c_max:
+		cart_front_world = src_a + a_to_c.normalized() * c_max
+	# Source B is constrained to be equidistant from A and C (the midpoint).
+	var src_b := (src_a + cart_front_world) * 0.5
+	var rope_dir := src_b - cart_front_world
 	rope_dir.y = 0.0
 	if rope_dir.length_squared() < 1e-6:
 		return
@@ -281,9 +357,6 @@ func _apply_yaw_toward_camera(state: PhysicsDirectBodyState3D, player: Character
 	var angle := fwd.signed_angle_to(want, Vector3.UP)
 	if absf(angle) < 0.004:
 		return
-	var intent := 1.0
-	if player.has_method("get_cart_push_intent"):
-		intent = player.get_cart_push_intent()
 	# Look-only rotations should not steer as aggressively as active pushing input.
 	var idle_w := lerpf(yaw_align_idle_scale, 1.0, intent)
 	# P-controller on yaw error with hard torque clamp for deterministic tuning.
@@ -291,19 +364,83 @@ func _apply_yaw_toward_camera(state: PhysicsDirectBodyState3D, player: Character
 	state.apply_torque(Vector3.UP * torque)
 
 
-func _apply_grabbed_grounding(state: PhysicsDirectBodyState3D) -> void:
-	if state.get_contact_count() <= 0:
+func _enforce_cart_front_lock_to_c(state: PhysicsDirectBodyState3D, player: CharacterBody3D) -> void:
+	var cam: Camera3D = null
+	for c in player.get_children():
+		if c is Camera3D:
+			cam = c
+			break
+	if cam == null:
 		return
-	var vy := state.linear_velocity.y
-	# Real falls: let gravity act unassisted.
-	if vy < falling_velocity_threshold:
+	var src_a_valid := false
+	var src_a := Vector3.ZERO
+	var tip := cam.get_node_or_null("CameraSteerTipDebug") as MeshInstance3D
+	if tip != null and is_instance_valid(tip):
+		src_a = tip.global_position
+		src_a_valid = true
+	else:
+		var cam_fwd := -cam.global_transform.basis.z
+		if cam_fwd.length_squared() > 1e-6:
+			cam_fwd = cam_fwd.normalized()
+			src_a = cam.global_transform.origin + cam_fwd * 6.0
+			src_a_valid = true
+	if not src_a_valid:
 		return
-	# Upward motion (jump, curb pop): do not add extra downward hold,
-	# or we will immediately cancel loft and hide jump sync.
-	if vy > 0.0:
+
+	# Current cart front anchor (body-dependent), then clamp to source-C max distance from A.
+	var front_now := state.transform.origin \
+		+ (-state.transform.basis.z) * steer_source_cart_forward \
+		+ Vector3.UP * steer_source_cart_height
+	var a_to_c := front_now - src_a
+	var c_max := maxf(0.2, steer_source_c_max_dist)
+	var c_target := front_now
+	if a_to_c.length() > c_max:
+		c_target = src_a + a_to_c.normalized() * c_max
+
+	# Absolute lock in XZ only (avoid downward snaps from camera pitch/height changes).
+	var lock_delta := c_target - front_now
+	lock_delta.y = 0.0
+	var step_cap := maxf(0.05, steer_lock_max_step_m)
+	if lock_delta.length() > step_cap:
+		lock_delta = lock_delta.normalized() * step_cap
+	if lock_delta.length_squared() < 1e-8:
 		return
-	# Downward bias is applied only when supported so real drops remain ballistic.
-	state.apply_central_force(Vector3.DOWN * grabbed_downward_bias)
+	var t := state.transform
+	t.origin += lock_delta
+	# Keep center above a minimum safety height so grab cannot pop underground.
+	t.origin.y = maxf(t.origin.y, steer_lock_min_center_y)
+	state.transform = t
+
+	# Prevent immediate separation along the planar lock axis.
+	var n := lock_delta.normalized()
+	var v := state.linear_velocity
+	var sep_speed := -v.dot(n)
+	if sep_speed > 0.0:
+		v += n * sep_speed
+		state.linear_velocity = v
+
+
+func _maybe_emit_heavy_impact_feedback(state: PhysicsDirectBodyState3D, player: CharacterBody3D) -> void:
+	if _impact_feedback_cd_t > 0.0:
+		return
+	var speed := state.linear_velocity.length()
+	if speed < impact_layer_2_min_speed:
+		return
+	var structural_layer_mask := 1 << (2 - 1) # Layer 2
+	for i in range(state.get_contact_count()):
+		var collider := state.get_contact_collider_object(i)
+		if not collider is CollisionObject3D:
+			continue
+		var c := collider as CollisionObject3D
+		if (c.collision_layer & structural_layer_mask) == 0:
+			continue
+		_impact_feedback_cd_t = impact_feedback_cooldown_sec
+		var w := get_parent()
+		if w != null and w.has_method("play_cart_impact_feedback"):
+			w.call("play_cart_impact_feedback", speed)
+		if player != null and player.has_method("on_cart_heavy_impact"):
+			player.call("on_cart_heavy_impact", speed)
+		return
 
 
 func _update_steer_debug_sources(state: PhysicsDirectBodyState3D, player: CharacterBody3D) -> void:
@@ -312,15 +449,25 @@ func _update_steer_debug_sources(state: PhysicsDirectBodyState3D, player: Charac
 			_steer_source_cart_debug.visible = false
 		if _steer_rope_debug != null:
 			_steer_rope_debug.visible = false
+		if _steer_rope_cb_debug != null:
+			_steer_rope_cb_debug.visible = false
+		if _steer_source_cart_front_debug != null:
+			_steer_source_cart_front_debug.visible = false
+		if _steer_rope_length_label != null:
+			_steer_rope_length_label.visible = false
+		if _steer_rope_cb_length_label != null:
+			_steer_rope_cb_length_label.visible = false
 		return
 	if _steer_source_cart_debug == null or _steer_rope_debug == null:
 		return
-	# Source B: cart-local, in front of the cart.
-	var cart_front_world := global_transform.origin \
-		+ (-global_transform.basis.z) * steer_source_cart_forward \
+	# Raw C point: always pinned to the cart's front plane.
+	var cart_front_raw := state.transform.origin \
+		+ (-state.transform.basis.z) * steer_source_cart_forward \
 		+ Vector3.UP * steer_source_cart_height
-	_steer_source_cart_debug.visible = true
-	_steer_source_cart_debug.global_position = cart_front_world
+	var cart_front_world := cart_front_raw
+	if _steer_source_cart_front_debug != null:
+		_steer_source_cart_front_debug.visible = true
+		_steer_source_cart_front_debug.global_position = cart_front_raw
 
 	# Source A: camera tip in front of the player's gaze, if available.
 	var src_a_valid := false
@@ -343,17 +490,40 @@ func _update_steer_debug_sources(state: PhysicsDirectBodyState3D, player: Charac
 
 	if not src_a_valid:
 		_steer_rope_debug.visible = false
+		if _steer_rope_cb_debug != null:
+			_steer_rope_cb_debug.visible = false
+		if _steer_rope_length_label != null:
+			_steer_rope_length_label.visible = false
+		if _steer_rope_cb_length_label != null:
+			_steer_rope_cb_length_label.visible = false
+		if _steer_source_cart_debug != null:
+			_steer_source_cart_debug.visible = false
+		if _steer_source_cart_front_debug != null:
+			_steer_source_cart_front_debug.visible = true
+			_steer_source_cart_front_debug.global_position = cart_front_raw
 		return
 
-	# Rope AB: simple cylinder between A and B.
-	var dir := src_a - cart_front_world
-	var hard_max := maxf(0.2, steer_rope_max_len)
-	var dir_len := dir.length()
-	if dir_len > hard_max:
-		dir = (dir / dir_len) * hard_max
+	var a_to_c := cart_front_world - src_a
+	var c_max := maxf(0.2, steer_source_c_max_dist)
+	if a_to_c.length() > c_max:
+		cart_front_world = src_a + a_to_c.normalized() * c_max
+	# B is equidistant from A and C by definition (midpoint of segment AC).
+	var src_b := (src_a + cart_front_world) * 0.5
+
+	_steer_source_cart_debug.visible = true
+	_steer_source_cart_debug.global_position = src_b
+
+	# Rope AB: exact A<->B connector, hard-locked length.
+	var dir := src_b - src_a
 	var h := dir.length()
 	if h < 0.05:
 		_steer_rope_debug.visible = false
+		if _steer_rope_cb_debug != null:
+			_steer_rope_cb_debug.visible = false
+		if _steer_rope_length_label != null:
+			_steer_rope_length_label.visible = false
+		if _steer_rope_cb_length_label != null:
+			_steer_rope_cb_length_label.visible = false
 		return
 	_steer_rope_debug.visible = true
 	var y_axis := dir / h
@@ -363,10 +533,42 @@ func _update_steer_debug_sources(state: PhysicsDirectBodyState3D, player: Charac
 	x_axis = x_axis.normalized()
 	var z_axis := x_axis.cross(y_axis).normalized()
 	x_axis = y_axis.cross(z_axis).normalized()
-	_steer_rope_debug.global_position = cart_front_world + dir * 0.5
+	_steer_rope_debug.global_position = src_a + dir * 0.5
 	_steer_rope_debug.global_basis = Basis(x_axis, y_axis, z_axis)
 	var cyl := _steer_rope_debug.mesh as CylinderMesh
 	cyl.height = h
+	if _steer_rope_length_label != null:
+		_steer_rope_length_label.visible = steer_rope_length_label_visible
+		if steer_rope_length_label_visible:
+			_steer_rope_length_label.global_position = src_a + dir * 0.5 + Vector3.UP * 0.22
+			_steer_rope_length_label.text = "%0.2fm" % h
+
+	# Rope CB: visible string from raw cart-front C (green) to locked endpoint B, with distance.
+	if _steer_rope_cb_debug != null:
+		var dir_cb := src_b - cart_front_raw
+		var h_cb := dir_cb.length()
+		if h_cb < 0.05:
+			_steer_rope_cb_debug.visible = false
+			if _steer_rope_cb_length_label != null:
+				_steer_rope_cb_length_label.visible = false
+		else:
+			_steer_rope_cb_debug.visible = true
+			var y_cb := dir_cb / h_cb
+			var x_cb := y_cb.cross(Vector3.FORWARD)
+			if x_cb.length_squared() < 1e-6:
+				x_cb = y_cb.cross(Vector3.RIGHT)
+			x_cb = x_cb.normalized()
+			var z_cb := x_cb.cross(y_cb).normalized()
+			x_cb = y_cb.cross(z_cb).normalized()
+			_steer_rope_cb_debug.global_position = cart_front_raw + dir_cb * 0.5
+			_steer_rope_cb_debug.global_basis = Basis(x_cb, y_cb, z_cb)
+			var cyl_cb := _steer_rope_cb_debug.mesh as CylinderMesh
+			cyl_cb.height = h_cb
+			if _steer_rope_cb_length_label != null:
+				_steer_rope_cb_length_label.visible = steer_rope_length_label_visible
+				if steer_rope_length_label_visible:
+					_steer_rope_cb_length_label.global_position = cart_front_raw + dir_cb * 0.5 + Vector3.UP * 0.16
+					_steer_rope_cb_length_label.text = "CB %0.2fm" % h_cb
 
 
 func is_player_in_handle_zone(player: CharacterBody3D) -> bool:
