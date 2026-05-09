@@ -7,9 +7,9 @@ extends RigidBody3D
 ## =============================================================================
 
 ## --- Yaw (camera vs cart heading) — torque only, no offset wheel forces ---
-@export var yaw_align_strength: float = 164.0
+@export var yaw_align_strength: float = 210.0
 @export var yaw_angular_damping: float = 6.0
-@export var yaw_max_torque: float = 370.0
+@export var yaw_max_torque: float = 460.0
 ## Scale yaw correction when player is not pressing movement (look-only).
 @export var yaw_align_idle_scale: float = 0.35
 ## Debug: draw camera/cart steering sources and connecting rope (visual only).
