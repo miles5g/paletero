@@ -78,6 +78,9 @@ var _transfer_button: Button = null
 var _btn_manifest: Button
 var _btn_stats: Button
 var _btn_map: Button
+var _left_rail_panel: Control = null
+## True while manifest was opened from NPC terminal (cart/player sell) — hide category rail.
+var _npc_terminal_manifest_layout: bool = false
 var _right_panel: Control
 var _manifest_page: Control
 var _stats_page: Control
@@ -174,6 +177,7 @@ func _ready() -> void:
 		_transfer_button.name = "TransferButton"
 		_transfer_button.text = "[ TRANSFER ]"
 		_action_list.add_child(_transfer_button)
+	_left_rail_panel = get_node_or_null("OuterMargin/MainContainer/LeftRailPanel") as Control
 	_btn_manifest = get_node("OuterMargin/MainContainer/LeftRailPanel/LeftRail/BtnManifest") as Button
 	_btn_stats = get_node("OuterMargin/MainContainer/LeftRailPanel/LeftRail/BtnStats") as Button
 	_btn_map = get_node("OuterMargin/MainContainer/LeftRailPanel/LeftRail/BtnMap") as Button
@@ -573,6 +577,19 @@ func _on_map_view_gui_input(event: InputEvent) -> void:
 
 func _on_inventory_visibility_changed() -> void:
 	_reset_map_zoom()
+	if not visible:
+		clear_npc_terminal_manifest_layout()
+
+
+func clear_npc_terminal_manifest_layout() -> void:
+	_npc_terminal_manifest_layout = false
+	_apply_npc_terminal_manifest_layout()
+
+
+func _apply_npc_terminal_manifest_layout() -> void:
+	if _left_rail_panel == null:
+		return
+	_left_rail_panel.visible = not _npc_terminal_manifest_layout
 
 
 func _reset_map_zoom() -> void:
@@ -1162,6 +1179,8 @@ func open_manifest_cart_overlay() -> void:
 		return
 	bind_inventory_owner(_cart_owner)
 	_show_section(Section.MANIFEST)
+	_npc_terminal_manifest_layout = true
+	_apply_npc_terminal_manifest_layout()
 	visible = true
 	refresh()
 
@@ -1172,6 +1191,8 @@ func open_manifest_player_overlay() -> void:
 		return
 	bind_inventory_owner(_player_owner)
 	_show_section(Section.MANIFEST)
+	_npc_terminal_manifest_layout = true
+	_apply_npc_terminal_manifest_layout()
 	visible = true
 	refresh()
 

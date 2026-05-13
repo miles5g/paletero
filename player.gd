@@ -1325,6 +1325,8 @@ func _toggle_inventory_menu() -> void:
 		return
 	panel.visible = not panel.visible
 	if panel.visible:
+		if panel.has_method("clear_npc_terminal_manifest_layout"):
+			panel.clear_npc_terminal_manifest_layout()
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		var cart := _resolve_cart_for_inventory()
 		var inventory_owner_node: Node = self
@@ -1353,6 +1355,8 @@ func _toggle_inventory_map_menu() -> void:
 		return
 	if not panel.visible:
 		panel.visible = true
+		if panel.has_method("clear_npc_terminal_manifest_layout"):
+			panel.clear_npc_terminal_manifest_layout()
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		var cart := _resolve_cart_for_inventory()
 		var inventory_owner_node: Node = self
