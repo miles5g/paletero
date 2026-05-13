@@ -1156,6 +1156,26 @@ func bind_inventory_owner(inventory_owner_node: Node) -> void:
 	update_total_manifest_weight()
 
 
+func open_manifest_cart_overlay() -> void:
+	_resolve_known_owners()
+	if _cart_owner == null:
+		return
+	bind_inventory_owner(_cart_owner)
+	_show_section(Section.MANIFEST)
+	visible = true
+	refresh()
+
+
+func open_manifest_player_overlay() -> void:
+	_resolve_known_owners()
+	if _player_owner == null:
+		return
+	bind_inventory_owner(_player_owner)
+	_show_section(Section.MANIFEST)
+	visible = true
+	refresh()
+
+
 func update_total_manifest_weight() -> void:
 	if _total_money_label == null and _total_weight_label == null:
 		return

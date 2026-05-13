@@ -8,6 +8,8 @@ const _MAP_STRUCTURAL_LAYER: int = 1
 const _PHYSICAL_ITEM_SCENE: PackedScene = preload("res://PhysicalItem.tscn")
 const _CELESTIAL_CYCLE_SCRIPT: Script = preload("res://celestial_cycle.gd")
 const _CLIENT_NPC_SCRIPT: Script = preload("res://client_npc.gd")
+const _NPC_TX_SCRIPT: Script = preload("res://npc_transaction_ui.gd")
+const _NPC_DIALOGUE_SCRIPT: Script = preload("res://npc_dialogue_ui.gd")
 const BUILDING_BASE_SCENE: PackedScene = preload("res://Building_Base.tscn")
 
 var _compass_bar_label: Label = null
@@ -568,6 +570,20 @@ func _ready() -> void:
 
 	var minimap_hud := preload("res://minimap_hud.gd").new()
 	hud.add_child(minimap_hud)
+
+	var npc_term := Control.new()
+	npc_term.set_script(_NPC_TX_SCRIPT)
+	npc_term.name = "NPCTerminal"
+	npc_term.z_index = 95
+	hud.add_child(npc_term)
+	var term_npc_font := _make_terminal_font()
+	_apply_terminal_theme_to_node(npc_term, term_npc_font, 12)
+
+	var npc_dlg := Control.new()
+	npc_dlg.set_script(_NPC_DIALOGUE_SCRIPT)
+	npc_dlg.name = "NPCDialogue"
+	npc_dlg.z_index = 98
+	hud.add_child(npc_dlg)
 
 	var inv_menu: Node = load("res://MasterHUD.tscn").instantiate()
 	if inv_menu is Control:
