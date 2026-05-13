@@ -11,6 +11,7 @@ var _body_label: Label = null
 var _choices_box: VBoxContainer = null
 
 var _current_node_id: String = ""
+var _speaker_override: String = ""
 
 const _CHOICE_ROW_H: float = 32.0
 const _CHOICE_SEP: int = 6
@@ -130,7 +131,8 @@ func _ready() -> void:
 	_apply_bar_layout()
 
 
-func open_dialogue(start_id: String = "start") -> void:
+func open_dialogue(start_id: String = "start", speaker_name: String = "") -> void:
+	_speaker_override = speaker_name.strip_edges()
 	_apply_root_layout()
 	_apply_bar_layout()
 	visible = true
@@ -144,6 +146,7 @@ func close_dialogue() -> void:
 		return
 	visible = false
 	_current_node_id = ""
+	_speaker_override = ""
 	dialogue_closed.emit()
 
 
@@ -187,7 +190,10 @@ func _show_node(id: String) -> void:
 	if node == null:
 		close_dialogue()
 		return
-	_speaker_label.text = str(node.get("speaker", "CLIENT"))
+	if _speaker_override != "":
+		_speaker_label.text = _speaker_override
+	else:
+		_speaker_label.text = str(node.get("speaker", "CLIENT"))
 	_body_label.text = str(node.get("text", ""))
 	while _choices_box.get_child_count() > 0:
 		var c := _choices_box.get_child(0)

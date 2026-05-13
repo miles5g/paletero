@@ -1,6 +1,9 @@
 extends StaticBody3D
 class_name ClientNPC
 
+## Shown on the HUD terminal and dialogue speaker line (unique per spawned NPC).
+@export var display_name: String = "Cliente"
+
 ## Interaction radius where the player can transact with this client.
 @export var interaction_radius: float = 1.85
 

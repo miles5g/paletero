@@ -73,6 +73,10 @@ var _player_jump_coyote_t: float = 0.0
 var _active_client: Node3D = null
 var _in_npc_transaction: bool = false
 var _npc_dialogue_active: bool = false
+## When true, next dialogue_closed reopens the NPC terminal instead of returning to gameplay.
+var _resume_npc_terminal_after_dialogue: bool = false
+## Cart/player inventory opened from NPC terminal — ESC returns to terminal instead of only closing menus.
+var _expect_esc_return_to_npc_terminal: bool = false
 var can_interact: bool = false
 
 var _mesh_instance: MeshInstance3D
@@ -154,7 +158,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		if _npc_dialogue_active:
 			var dlg := get_parent().get_node_or_null("HUD/NPCDialogue")
 			if dlg != null and dlg.has_method("close_dialogue"):
+				_resume_npc_terminal_after_dialogue = true
 				dlg.close_dialogue()
+			return
+		if _is_inventory_menu_open() and _expect_esc_return_to_npc_terminal:
+			_close_inventory_and_return_to_npc_terminal()
 			return
 		if _in_npc_transaction:
 			_end_npc_transaction()
@@ -206,15 +214,18 @@ func _unhandled_input(event: InputEvent) -> void:
 func _physics_process(delta: float) -> void:
 	var t_down := Input.is_key_pressed(KEY_T)
 	if t_down and not _wait_t_prev_down:
-		_request_wait_toggle()
+		if not _npc_ui_modal_open():
+			_request_wait_toggle()
 	_wait_t_prev_down = t_down
-	if Input.is_action_just_pressed("toggle_inventory"):
-		_toggle_inventory_menu()
-	if Input.is_action_just_pressed("inventory_map"):
-		_toggle_inventory_map_menu()
+	if not _npc_ui_modal_open():
+		if Input.is_action_just_pressed("toggle_inventory"):
+			_toggle_inventory_menu()
+		if Input.is_action_just_pressed("inventory_map"):
+			_toggle_inventory_map_menu()
 	_update_pickup_target_and_prompt()
-	if Input.is_action_just_pressed("interact"):
-		_interact()
+	if not _npc_ui_modal_open():
+		if Input.is_action_just_pressed("interact"):
+			_interact()
 
 	var player_grounded := is_on_floor()
 	if _npc_ui_modal_open():
@@ -1177,8 +1188,6 @@ func _connect_npc_terminal_ui() -> void:
 		term.player_inventory_pressed.connect(_on_npc_term_player)
 	if term.has_signal("talk_pressed") and not term.talk_pressed.is_connected(_on_npc_term_talk):
 		term.talk_pressed.connect(_on_npc_term_talk)
-	if term.has_signal("close_requested") and not term.close_requested.is_connected(_on_npc_term_close):
-		term.close_requested.connect(_on_npc_term_close)
 	var dlg := get_parent().get_node_or_null("HUD/NPCDialogue")
 	if dlg != null and dlg.has_signal("dialogue_closed") and not dlg.dialogue_closed.is_connected(_on_npc_dialogue_closed):
 		dlg.dialogue_closed.connect(_on_npc_dialogue_closed)
@@ -1186,8 +1195,38 @@ func _connect_npc_terminal_ui() -> void:
 
 func _on_npc_dialogue_closed() -> void:
 	_npc_dialogue_active = false
+	if _resume_npc_terminal_after_dialogue:
+		_resume_npc_terminal_after_dialogue = false
+		if _active_client != null and is_instance_valid(_active_client):
+			_begin_npc_transaction()
+		return
 	if not _is_inventory_menu_open() and not _in_npc_transaction:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+func _active_client_display_name() -> String:
+	if _active_client != null and is_instance_valid(_active_client):
+		var v: Variant = _active_client.get("display_name")
+		if v != null:
+			var s := str(v).strip_edges()
+			if s != "":
+				return s
+	return "Cliente"
+
+
+func _close_inventory_and_return_to_npc_terminal() -> void:
+	_expect_esc_return_to_npc_terminal = false
+	var panel := _inventory_menu_panel()
+	if panel != null:
+		panel.visible = false
+	if _active_client != null and is_instance_valid(_active_client):
+		_begin_npc_transaction()
+	else:
+		if not _is_inventory_menu_open():
+			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		var wp := get_parent()
+		if wp != null and wp.has_method("set_grab_prompts_visible") and not _is_inventory_menu_open():
+			wp.call_deferred("set_grab_prompts_visible", true)
 
 
 func _begin_npc_transaction() -> void:
@@ -1195,10 +1234,11 @@ func _begin_npc_transaction() -> void:
 		return
 	if _in_npc_transaction:
 		return
+	_expect_esc_return_to_npc_terminal = false
 	_in_npc_transaction = true
 	var term := get_parent().get_node_or_null("HUD/NPCTerminal")
 	if term != null and term.has_method("open_terminal"):
-		term.open_terminal()
+		term.open_terminal(_active_client_display_name())
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	var w := get_parent()
 	if w != null and w.has_method("set_grab_prompts_visible"):
@@ -1223,6 +1263,7 @@ func _on_npc_term_cart() -> void:
 	var panel := _inventory_menu_panel()
 	if panel != null and panel.has_method("open_manifest_cart_overlay"):
 		panel.open_manifest_cart_overlay()
+	_expect_esc_return_to_npc_terminal = true
 	_end_npc_transaction()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
@@ -1231,6 +1272,7 @@ func _on_npc_term_player() -> void:
 	var panel := _inventory_menu_panel()
 	if panel != null and panel.has_method("open_manifest_player_overlay"):
 		panel.open_manifest_player_overlay()
+	_expect_esc_return_to_npc_terminal = true
 	_end_npc_transaction()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
@@ -1239,13 +1281,9 @@ func _on_npc_term_talk() -> void:
 	var dlg := get_parent().get_node_or_null("HUD/NPCDialogue")
 	_end_npc_transaction()
 	if dlg != null and dlg.has_method("open_dialogue"):
-		dlg.open_dialogue("start")
+		dlg.open_dialogue("start", _active_client_display_name())
 		_npc_dialogue_active = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-
-
-func _on_npc_term_close() -> void:
-	_end_npc_transaction()
 
 
 func _inventory_menu_panel() -> Panel:
@@ -1279,12 +1317,9 @@ func _resolve_cart_for_inventory() -> RigidBody3D:
 
 
 func _toggle_inventory_menu() -> void:
-	if _npc_dialogue_active:
-		var dlg2 := get_parent().get_node_or_null("HUD/NPCDialogue")
-		if dlg2 != null and dlg2.has_method("close_dialogue"):
-			dlg2.close_dialogue()
-	if _in_npc_transaction:
-		_end_npc_transaction()
+	if _npc_ui_modal_open():
+		return
+	_expect_esc_return_to_npc_terminal = false
 	var panel := _inventory_menu_panel()
 	if panel == null:
 		return
@@ -1306,12 +1341,9 @@ func _toggle_inventory_menu() -> void:
 
 
 func _toggle_inventory_map_menu() -> void:
-	if _npc_dialogue_active:
-		var dlg3 := get_parent().get_node_or_null("HUD/NPCDialogue")
-		if dlg3 != null and dlg3.has_method("close_dialogue"):
-			dlg3.close_dialogue()
-	if _in_npc_transaction:
-		_end_npc_transaction()
+	if _npc_ui_modal_open():
+		return
+	_expect_esc_return_to_npc_terminal = false
 	var panel := _inventory_menu_panel()
 	if panel == null:
 		return

@@ -17,6 +17,23 @@ var _compass_waypoint_label: Label = null
 var _compass_caret_label: Label = null
 var _money_ching_player: AudioStreamPlayer = null
 var _cart_impact_player: AudioStreamPlayer = null
+var _next_client_display_name_idx: int = 0
+
+
+func _take_next_client_display_name() -> String:
+	var names: PackedStringArray = PackedStringArray([
+		"Don Miguel Herrera",
+		"Doña Rosa Morales",
+		"Don Javier Ruiz",
+		"Marisol Vega",
+		"Luis Fernando Ortiz",
+		"Carmen Delgado",
+		"Roberto Sandoval",
+		"Elena Jiménez",
+	])
+	var i := _next_client_display_name_idx % names.size()
+	_next_client_display_name_idx += 1
+	return names[i]
 
 
 func _slot_stylebox() -> StyleBoxFlat:
@@ -909,6 +926,7 @@ func _spawn_client_npc() -> void:
 	var client := StaticBody3D.new()
 	client.name = "ClientNPC"
 	client.set_script(_CLIENT_NPC_SCRIPT)
+	client.display_name = _take_next_client_display_name()
 	client.position = Vector3(5.5, 1.0, -3.4)
 	var mesh := MeshInstance3D.new()
 	mesh.mesh = CapsuleMesh.new()

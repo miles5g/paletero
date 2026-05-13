@@ -5,7 +5,8 @@ extends Control
 signal cart_inventory_pressed
 signal player_inventory_pressed
 signal talk_pressed
-signal close_requested
+
+var _title_label: Label = null
 
 
 func _ready() -> void:
@@ -34,9 +35,9 @@ func _ready() -> void:
 	panel.anchor_right = 0.5
 	panel.anchor_bottom = 0.5
 	panel.offset_left = -172.0
-	panel.offset_top = -132.0
+	panel.offset_top = -118.0
 	panel.offset_right = 172.0
-	panel.offset_bottom = 132.0
+	panel.offset_bottom = 118.0
 	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	panel.grow_vertical = Control.GROW_DIRECTION_BOTH
 
@@ -50,25 +51,17 @@ func _ready() -> void:
 
 	var vbox := VBoxContainer.new()
 	vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
-	vbox.add_theme_constant_override("separation", 10)
+	vbox.add_theme_constant_override("separation", 8)
 	margin.add_child(vbox)
 
-	var title := Label.new()
-	title.text = "> CLIENT TERMINAL"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vbox.add_child(title)
-
-	var sub := Label.new()
-	sub.text = "Select inventory channel or dialogue."
-	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	sub.add_theme_font_size_override("font_size", 11)
-	sub.add_theme_color_override("font_color", Color(0.72, 0.76, 0.82, 0.88))
-	vbox.add_child(sub)
+	_title_label = Label.new()
+	_title_label.text = "> Cliente"
+	_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(_title_label)
 
 	vbox.add_child(_make_btn("[ CART INVENTORY ]", func() -> void: cart_inventory_pressed.emit()))
 	vbox.add_child(_make_btn("[ PLAYER INVENTORY ]", func() -> void: player_inventory_pressed.emit()))
 	vbox.add_child(_make_btn("[ TALK ]", func() -> void: talk_pressed.emit()))
-	vbox.add_child(_make_btn("[ CLOSE ]", func() -> void: close_requested.emit()))
 
 	add_child(panel)
 
@@ -81,7 +74,12 @@ func _make_btn(txt: String, on_press: Callable) -> Button:
 	return b
 
 
-func open_terminal() -> void:
+func open_terminal(character_name: String = "") -> void:
+	if _title_label != null:
+		var n := character_name.strip_edges()
+		if n.is_empty():
+			n = "Cliente"
+		_title_label.text = "> %s" % n
 	visible = true
 
 
