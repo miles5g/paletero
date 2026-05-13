@@ -10,6 +10,12 @@ extends RigidBody3D
 @export var yaw_align_strength: float = 210.0
 @export var yaw_angular_damping: float = 6.0
 @export var yaw_max_torque: float = 460.0
+## Damp rotation around body X (pitch) so the nose does not dive while pushing forward.
+@export var pitch_stabilize_gain: float = 19.0
+## Camera pitch → cart nose up/down (torque on local X). Weaker than yaw: lower strength + track_scale < 1.
+@export var pitch_aim_track_scale: float = 0.28
+@export var pitch_aim_strength: float = 72.0
+@export var pitch_aim_max_torque: float = 155.0
 ## Scale yaw correction when player is not pressing movement (look-only).
 @export var yaw_align_idle_scale: float = 0.35
 ## Debug: draw camera/cart steering sources and connecting rope (visual only).
@@ -294,11 +300,18 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 		_enforce_cart_front_lock_to_c(state, player)
 	# Continuous yaw damping keeps angular velocity bounded between heading updates.
 	state.apply_torque(Vector3.UP * (-av.y * yaw_angular_damping))
+	# Low COM + forward friction excites nose-down pitch; damp about cart-local X only.
+	var bx := state.transform.basis.x
+	if bx.length_squared() > 1e-8:
+		bx = bx.normalized()
+		var pitch_rate := av.dot(bx)
+		state.apply_torque(-bx * pitch_rate * pitch_stabilize_gain)
 	if _impact_feedback_cd_t > 0.0:
 		_impact_feedback_cd_t = maxf(0.0, _impact_feedback_cd_t - state.step)
 	_maybe_emit_heavy_impact_feedback(state, player)
 	if player != null:
 		_apply_yaw_toward_camera(state, player)
+		_apply_pitch_toward_camera(state, player)
 		_update_steer_debug_sources(state, player)
 	elif steer_debug_visible:
 		_update_steer_debug_sources(state, null)
@@ -423,6 +436,44 @@ func _apply_yaw_toward_camera(state: PhysicsDirectBodyState3D, player: Character
 	# P-controller on yaw error with hard torque clamp for deterministic tuning.
 	var torque := clampf(angle * yaw_align_strength * idle_w, -yaw_max_torque, yaw_max_torque)
 	state.apply_torque(Vector3.UP * torque)
+
+
+func _apply_pitch_toward_camera(state: PhysicsDirectBodyState3D, player: CharacterBody3D) -> void:
+	var intent := 1.0
+	if player.has_method("get_cart_push_intent"):
+		intent = player.get_cart_push_intent()
+	if intent <= 0.01:
+		return
+	var cam: Camera3D = null
+	for c in player.get_children():
+		if c is Camera3D:
+			cam = c
+			break
+	if cam == null:
+		return
+	var cam_fwd := (-cam.global_transform.basis.z).normalized()
+	var cam_h := sqrt(cam_fwd.x * cam_fwd.x + cam_fwd.z * cam_fwd.z)
+	if cam_h < 1e-5:
+		return
+	var cam_elev := atan2(cam_fwd.y, cam_h)
+
+	var f := (-state.transform.basis.z).normalized()
+	var f_h := sqrt(f.x * f.x + f.z * f.z)
+	if f_h < 1e-5:
+		return
+	var cur_elev := atan2(f.y, f_h)
+
+	var target_elev := cam_elev * pitch_aim_track_scale
+	var pitch_err := target_elev - cur_elev
+	if absf(pitch_err) < 0.003:
+		return
+	var idle_w := lerpf(yaw_align_idle_scale, 1.0, intent)
+	var bx := state.transform.basis.x
+	if bx.length_squared() < 1e-8:
+		return
+	bx = bx.normalized()
+	var tq := clampf(pitch_err * pitch_aim_strength * idle_w, -pitch_aim_max_torque, pitch_aim_max_torque)
+	state.apply_torque(bx * tq)
 
 
 func _enforce_cart_front_lock_to_c(state: PhysicsDirectBodyState3D, player: CharacterBody3D) -> void:

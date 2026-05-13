@@ -694,8 +694,8 @@ func _ready() -> void:
 	cart.physics_material_override.friction = 0.18
 	cart.physics_material_override.bounce = 0.08
 	cart.center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
-	# Weighted-sled anchor: center of mass significantly below floor/axle zone.
-	cart.center_of_mass = Vector3(0.0, -0.72, -0.2)
+	# Keep mass near the wheel/axle line; an extreme low COM made the nose pitch down when accelerating.
+	cart.center_of_mass = Vector3(0.0, -0.22, -0.16)
 	cart.set_script(load("res://cart.gd"))
 	cart.position = Vector3(0, 1, -5) # 5 meters in front of center
 	
