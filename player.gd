@@ -329,8 +329,38 @@ func _candidate_cart_for_occlusion() -> RigidBody3D:
 		nearest = cart
 	return nearest
 
+
+func _resolve_client_for_occlusion() -> Node3D:
+	if _active_client != null and is_instance_valid(_active_client):
+		return _active_client
+	for c in get_tree().get_nodes_in_group("clients"):
+		if c is Node3D and c.has_method("is_player_in_range") and c.is_player_in_range(self):
+			return c
+	return null
+
+
 func _update_player_occlusion_fade(delta: float) -> void:
 	if _camera == null or _mesh_instance == null:
+		return
+	# Terminal / dialogue: same translucent capsule as cart occlusion (camera ray -> NPC).
+	if _npc_ui_modal_open():
+		var client := _resolve_client_for_occlusion()
+		if client == null:
+			_player_transparency_target = lerpf(_player_transparency_target, 0.0, minf(1.0, delta * 10.0))
+			_mesh_instance.transparency = _player_transparency_target
+			return
+		var blocked_npc := false
+		var cam_npc := _camera.global_transform.origin
+		var npc_focus := client.global_position + Vector3.UP * 0.35
+		var qn := PhysicsRayQueryParameters3D.create(cam_npc, npc_focus)
+		qn.collision_mask = collision_mask
+		var hit_npc: Dictionary = get_world_3d().direct_space_state.intersect_ray(qn)
+		if not hit_npc.is_empty() and hit_npc.has("collider"):
+			var collider_npc := hit_npc["collider"] as Object
+			blocked_npc = collider_npc == self
+		var fade_npc := 0.5 if blocked_npc else 0.0
+		_player_transparency_target = lerpf(_player_transparency_target, fade_npc, minf(1.0, delta * 10.0))
+		_mesh_instance.transparency = _player_transparency_target
 		return
 	if not is_pushing or current_cart == null or not is_instance_valid(current_cart):
 		_player_transparency_target = lerpf(_player_transparency_target, 0.0, minf(1.0, delta * 10.0))

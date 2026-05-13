@@ -20,6 +20,15 @@ func _ready() -> void:
 
 	var panel := Panel.new()
 	panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	# Default theme Panel is a flat gray fill — replace with transparent + outline only.
+	var panel_sb := StyleBoxFlat.new()
+	panel_sb.bg_color = Color(0, 0, 0, 0)
+	panel_sb.border_width_left = 2
+	panel_sb.border_width_top = 2
+	panel_sb.border_width_right = 2
+	panel_sb.border_width_bottom = 2
+	panel_sb.border_color = Color(0.42, 0.36, 0.18, 1.0)
+	panel.add_theme_stylebox_override("panel", panel_sb)
 	panel.anchor_left = 0.5
 	panel.anchor_top = 0.5
 	panel.anchor_right = 0.5
