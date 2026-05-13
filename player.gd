@@ -203,11 +203,13 @@ func _physics_process(delta: float) -> void:
 	if _cart_jump_sync_t > 0.0:
 		_cart_jump_sync_t = maxf(0.0, _cart_jump_sync_t - delta)
 
-	var can_player_jump := player_grounded or _player_jump_coyote_t > 0.0
-	var can_cart_jump := true
+	var can_jump := player_grounded or _player_jump_coyote_t > 0.0
 	if is_pushing:
-		can_cart_jump = current_cart != null and is_instance_valid(current_cart) and current_cart.get_contact_count() > 0
-	if Input.is_action_just_pressed("jump") and can_player_jump and can_cart_jump:
+		can_jump = current_cart != null \
+			and is_instance_valid(current_cart) \
+			and current_cart.has_method("can_player_jump") \
+			and current_cart.can_player_jump()
+	if Input.is_action_just_pressed("jump") and can_jump:
 		if is_pushing and current_cart != null and is_instance_valid(current_cart):
 			# Trigger cart launch immediately on jump press so it "starts" the hop a touch earlier.
 			_sync_cart_jump_launch(cart_jump_lead_vertical_bonus)

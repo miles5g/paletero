@@ -680,6 +680,9 @@ func _ready() -> void:
 	var cart = RigidBody3D.new()
 	cart.name = "Cart"
 	cart.mass = 12.0
+	# Needed so cart.gd can read contacts in _integrate_forces (jump gating, impacts).
+	cart.contact_monitor = true
+	cart.max_contacts_reported = 16
 	# Collide with both gameplay/default (1) and structural (2) layers.
 	cart.collision_layer = 1
 	cart.collision_mask = (1 << 0) | (1 << 1)

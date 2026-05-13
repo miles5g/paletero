@@ -30,6 +30,12 @@ extends RigidBody3D
 ## --- Heavy impact feedback (simple layer-2 structural check) ---
 @export var impact_layer_2_min_speed: float = 5.8
 @export var impact_feedback_cooldown_sec: float = 0.18
+## Jump gating lives on the cart so the player keys off cart support, not body contacts.
+@export var jump_ground_normal_min_dot: float = 0.35
+@export var jump_coyote_sec: float = 0.12
+## Hull-local start / cast length for ground ray (works when Jolt reports 0 contacts in integrate).
+@export var jump_support_ray_local_y: float = -0.08
+@export var jump_support_ray_length: float = 2.35
 
 var _handle_zone: Area3D
 var _interaction_area: Area3D
@@ -42,6 +48,8 @@ var _steer_rope_length_label: Label3D = null
 var _steer_rope_cb_debug: MeshInstance3D = null
 var _steer_rope_cb_length_label: Label3D = null
 var _impact_feedback_cd_t: float = 0.0
+var _jump_grounded: bool = false
+var _jump_coyote_t: float = 0.0
 
 var inventory_list: Array[ItemResource] = []
 
@@ -275,6 +283,7 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	# - Player script applies translational coupling (XZ + mild Y) while pushing.
 	# - Cart script applies rotational stabilization and heading assist.
 	# Keeping these responsibilities split avoids duplicate/competing force stacks.
+	_update_jump_support_state(state)
 	var player := _grabber_player()
 	var av := state.angular_velocity
 	var push_intent := 1.0
@@ -293,6 +302,58 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 		_update_steer_debug_sources(state, player)
 	elif steer_debug_visible:
 		_update_steer_debug_sources(state, null)
+
+
+func _cast_jump_support_ray(space: PhysicsDirectSpaceState3D, xf: Transform3D) -> bool:
+	var from := xf.origin + xf.basis * Vector3(0.0, jump_support_ray_local_y, 0.0)
+	var to := from + xf.basis * Vector3(0.0, -jump_support_ray_length, 0.0)
+	var q := PhysicsRayQueryParameters3D.create(from, to)
+	q.collision_mask = collision_mask
+	q.exclude = [get_rid()]
+	return not space.intersect_ray(q).is_empty()
+
+
+func _contacts_support_jump(state: PhysicsDirectBodyState3D) -> bool:
+	var min_up_dot := clampf(jump_ground_normal_min_dot, -1.0, 1.0)
+	var origin_y := state.transform.origin.y
+	for i in range(state.get_contact_count()):
+		var n_local := state.get_contact_local_normal(i)
+		var n_world := (state.transform.basis * n_local).normalized()
+		if n_world.dot(Vector3.UP) < 0.0:
+			n_world = -n_world
+		if n_world.dot(Vector3.UP) < min_up_dot:
+			continue
+		var c_pos := state.get_contact_local_position(i)
+		if c_pos.y > origin_y + 0.42:
+			continue
+		return true
+	return false
+
+
+func _update_jump_support_state(state: PhysicsDirectBodyState3D) -> void:
+	var grounded := false
+	var space_state := state.get_space_state()
+	if space_state != null and _cast_jump_support_ray(space_state, state.transform):
+		grounded = true
+	if not grounded:
+		grounded = _contacts_support_jump(state)
+	_jump_grounded = grounded
+	if grounded:
+		_jump_coyote_t = jump_coyote_sec
+	else:
+		_jump_coyote_t = maxf(0.0, _jump_coyote_t - state.step)
+
+
+func can_player_jump() -> bool:
+	if _jump_coyote_t > 0.0:
+		return true
+	if _jump_grounded:
+		return true
+	# Player._physics_process can run before this body's integrate step for this tick; ray uses current pose.
+	var w := get_world_3d()
+	if w == null:
+		return false
+	return _cast_jump_support_ray(w.direct_space_state, global_transform)
 
 
 func _grabber_player() -> CharacterBody3D:
