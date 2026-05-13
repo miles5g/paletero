@@ -12,9 +12,14 @@ var _choices_box: VBoxContainer = null
 
 var _current_node_id: String = ""
 
-const _CHOICE_ROW_H: float = 38.0
+const _CHOICE_ROW_H: float = 32.0
 const _CHOICE_SEP: int = 6
-const _CHOICE_ROWS: int = 4
+## Vertical space for the choice list (three rows tall; a fourth option scrolls).
+const _CHOICE_ROWS_SCROLL_VIEW: int = 3
+const _BAR_HEIGHT_PX: float = 228.0
+## Centered card width (clamped to viewport with side padding).
+const _BAR_MAX_WIDTH_PX: float = 640.0
+const _BAR_VIEWPORT_MARGIN_X: float = 48.0
 ## Minimal graph: id -> { "speaker": String, "text": String, "choices": [{ "label": String, "next": String }] }
 const _GRAPH := {
 	"start": {
@@ -62,14 +67,6 @@ func _ready() -> void:
 
 	_bar = Panel.new()
 	_bar.mouse_filter = Control.MOUSE_FILTER_STOP
-	_bar.anchor_left = 0.0
-	_bar.anchor_top = 1.0
-	_bar.anchor_right = 1.0
-	_bar.anchor_bottom = 1.0
-	_bar.offset_left = 0.0
-	_bar.offset_right = 0.0
-	_bar.offset_top = -288.0
-	_bar.offset_bottom = 0.0
 	var bar_sb := StyleBoxFlat.new()
 	bar_sb.bg_color = Color(0.07, 0.065, 0.055, 0.97)
 	bar_sb.border_width_left = 2
@@ -77,16 +74,16 @@ func _ready() -> void:
 	bar_sb.border_width_right = 2
 	bar_sb.border_width_bottom = 2
 	bar_sb.border_color = Color(0.42, 0.36, 0.18, 1.0)
-	bar_sb.content_margin_left = 18
-	bar_sb.content_margin_top = 14
-	bar_sb.content_margin_right = 18
-	bar_sb.content_margin_bottom = 14
+	bar_sb.content_margin_left = 16
+	bar_sb.content_margin_top = 10
+	bar_sb.content_margin_right = 16
+	bar_sb.content_margin_bottom = 10
 	_bar.add_theme_stylebox_override("panel", bar_sb)
 	add_child(_bar)
 
 	var outer := VBoxContainer.new()
 	outer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	outer.add_theme_constant_override("separation", 10)
+	outer.add_theme_constant_override("separation", 6)
 	_bar.add_child(outer)
 
 	_speaker_label = Label.new()
@@ -102,7 +99,7 @@ func _ready() -> void:
 	_body_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_body_label.text = ""
 	_body_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_body_label.custom_minimum_size.y = 56.0
+	_body_label.custom_minimum_size.y = 40.0
 	_body_label.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	_body_label.add_theme_font_override("font", _mono_font)
 	_body_label.add_theme_color_override("font_color", Color(0.92, 0.9, 0.84, 1.0))
@@ -114,8 +111,10 @@ func _ready() -> void:
 	outer.add_child(sep)
 
 	var scroll := ScrollContainer.new()
-	# Fixed room for four reply rows (FNV-style list); scroll if a node has more than four.
-	var choices_area_h := _CHOICE_ROW_H * float(_CHOICE_ROWS) + float(_CHOICE_SEP * maxi(0, _CHOICE_ROWS - 1))
+	var choices_area_h := (
+		_CHOICE_ROW_H * float(_CHOICE_ROWS_SCROLL_VIEW)
+		+ float(_CHOICE_SEP * maxi(0, _CHOICE_ROWS_SCROLL_VIEW - 1))
+	)
 	scroll.custom_minimum_size.y = choices_area_h
 	# Take remaining height inside the bottom panel so the strip never collapses to zero.
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -128,9 +127,12 @@ func _ready() -> void:
 	_choices_box.add_theme_constant_override("separation", _CHOICE_SEP)
 	scroll.add_child(_choices_box)
 
+	_apply_bar_layout()
+
 
 func open_dialogue(start_id: String = "start") -> void:
 	_apply_root_layout()
+	_apply_bar_layout()
 	visible = true
 	move_to_front()
 	# One frame after becoming visible so anchors/viewport size apply before building buttons.
@@ -154,8 +156,26 @@ func _apply_root_layout() -> void:
 	)
 
 
+func _apply_bar_layout() -> void:
+	if _bar == null:
+		return
+	var vp := get_viewport()
+	var vw: float = vp.get_visible_rect().size.x if vp != null else _BAR_MAX_WIDTH_PX
+	var w: float = minf(_BAR_MAX_WIDTH_PX, vw - _BAR_VIEWPORT_MARGIN_X)
+	w = maxf(w, 280.0)
+	_bar.anchor_left = 0.5
+	_bar.anchor_right = 0.5
+	_bar.anchor_top = 1.0
+	_bar.anchor_bottom = 1.0
+	_bar.offset_left = -w * 0.5
+	_bar.offset_right = w * 0.5
+	_bar.offset_top = -_BAR_HEIGHT_PX
+	_bar.offset_bottom = 0.0
+
+
 func _on_viewport_resized() -> void:
 	_apply_root_layout()
+	_apply_bar_layout()
 
 
 func _show_node(id: String) -> void:
@@ -210,7 +230,7 @@ func _make_choice_button(idx: int, label_text: String, next_id: String) -> Butto
 	b.add_theme_stylebox_override("pressed", hover)
 	b.add_theme_font_override("font", _mono_font)
 	b.add_theme_color_override("font_color", Color(0.82, 0.72, 0.42, 1.0))
-	b.add_theme_font_size_override("font_size", 13)
+	b.add_theme_font_size_override("font_size", 12)
 	b.pressed.connect(func() -> void: _show_node(next_id))
 	return b
 
