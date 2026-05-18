@@ -11,7 +11,7 @@ const MAP_STREET_LEN: float = 132.0
 const MAP_STREET_HALF_W: float = 6.5
 const MAP_CURB_W: float = 0.22
 const MAP_CURB_H: float = 0.16
-const MAP_SIDEWALK_W: float = 11.0
+const MAP_SIDEWALK_W: float = 3.5
 const MAP_SLAB_H: float = 0.22
 
 var _map_view: SubViewportContainer = null
@@ -226,8 +226,11 @@ func _build_map_proxy_geometry(root: Node3D) -> void:
 	road_mat.albedo_color = Color(0.78, 0.78, 0.78)
 	road_mat.roughness = 0.92
 	var plinth_mat := StandardMaterial3D.new()
-	plinth_mat.albedo_color = Color(0.62, 0.62, 0.62)
+	plinth_mat.albedo_color = Color(0.38, 0.37, 0.39)
 	plinth_mat.roughness = 0.94
+	var sidewalk_mat := StandardMaterial3D.new()
+	sidewalk_mat.albedo_color = Color(0.68, 0.67, 0.65)
+	sidewalk_mat.roughness = 0.86
 	var curb_mat := StandardMaterial3D.new()
 	curb_mat.albedo_color = Color(0.9, 0.9, 0.9)
 	curb_mat.roughness = 0.85
@@ -265,6 +268,22 @@ func _build_map_proxy_geometry(root: Node3D) -> void:
 		_add_map_box(root, Vector3(arm, MAP_CURB_H, MAP_CURB_W), Vector3(x_west, curb_y, inner), curb_mat)
 		_add_map_box(root, Vector3(arm, MAP_CURB_H, MAP_CURB_W), Vector3(x_east, curb_y, -inner), curb_mat)
 		_add_map_box(root, Vector3(arm, MAP_CURB_H, MAP_CURB_W), Vector3(x_east, curb_y, inner), curb_mat)
+		var sw_y := MAP_SLAB_H * 0.5 + 0.006
+		var sw := MAP_SIDEWALK_W + 0.06
+		var arm_half := arm * 0.5
+		var corner_stop := walk_c + sw * 0.5
+		_add_map_trimmed_sidewalk_ns(root, -walk_c, z_south - arm_half, -corner_stop, sw, sw_y, sidewalk_mat)
+		_add_map_trimmed_sidewalk_ns(root, walk_c, z_south - arm_half, -corner_stop, sw, sw_y, sidewalk_mat)
+		_add_map_trimmed_sidewalk_ns(root, -walk_c, z_north + arm_half, corner_stop, sw, sw_y, sidewalk_mat)
+		_add_map_trimmed_sidewalk_ns(root, walk_c, z_north + arm_half, corner_stop, sw, sw_y, sidewalk_mat)
+		_add_map_trimmed_sidewalk_ew(root, -walk_c, x_west - arm_half, -corner_stop, sw, sw_y, sidewalk_mat)
+		_add_map_trimmed_sidewalk_ew(root, walk_c, x_west - arm_half, -corner_stop, sw, sw_y, sidewalk_mat)
+		_add_map_trimmed_sidewalk_ew(root, -walk_c, x_east + arm_half, corner_stop, sw, sw_y, sidewalk_mat)
+		_add_map_trimmed_sidewalk_ew(root, walk_c, x_east + arm_half, corner_stop, sw, sw_y, sidewalk_mat)
+		_add_map_box(root, Vector3(sw, MAP_SLAB_H, sw), Vector3(walk_c, sw_y, walk_c), sidewalk_mat)
+		_add_map_box(root, Vector3(sw, MAP_SLAB_H, sw), Vector3(-walk_c, sw_y, walk_c), sidewalk_mat)
+		_add_map_box(root, Vector3(sw, MAP_SLAB_H, sw), Vector3(walk_c, sw_y, -walk_c), sidewalk_mat)
+		_add_map_box(root, Vector3(sw, MAP_SLAB_H, sw), Vector3(-walk_c, sw_y, -walk_c), sidewalk_mat)
 	var ramp := MeshInstance3D.new()
 	var ramp_mesh := BoxMesh.new()
 	ramp_mesh.size = Vector3(3.6, 0.6, 5.0)
@@ -285,3 +304,33 @@ func _add_map_box(root: Node3D, box_size: Vector3, pos: Vector3, mat: Material) 
 	mi.layers = 1 << (MAP_STRUCTURAL_LAYER - 1)
 	mi.position = pos
 	root.add_child(mi)
+
+
+func _add_map_trimmed_sidewalk_ns(
+	root: Node3D,
+	x_center: float,
+	z_tip: float,
+	z_stop: float,
+	sw: float,
+	sw_y: float,
+	mat: Material
+) -> void:
+	var len := absf(z_stop - z_tip)
+	if len <= 0.05:
+		return
+	_add_map_box(root, Vector3(sw, MAP_SLAB_H, len), Vector3(x_center, sw_y, (z_tip + z_stop) * 0.5), mat)
+
+
+func _add_map_trimmed_sidewalk_ew(
+	root: Node3D,
+	z_center: float,
+	x_tip: float,
+	x_stop: float,
+	sw: float,
+	sw_y: float,
+	mat: Material
+) -> void:
+	var len := absf(x_stop - x_tip)
+	if len <= 0.05:
+		return
+	_add_map_box(root, Vector3(len, MAP_SLAB_H, sw), Vector3((x_tip + x_stop) * 0.5, sw_y, z_center), mat)

@@ -178,6 +178,29 @@ func _make_dark_concrete_material(albedo_tex: Texture2D, uv_scale: Vector3) -> S
 	return m
 
 
+func _make_sidewalk_concrete_material(albedo_tex: Texture2D, tile_scale: float = 1.15) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.5, 0.49, 0.48)
+	m.albedo_texture = albedo_tex
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	# World-space triplanar: arm strips are long and thin — default box UVs stretch badly.
+	m.uv1_triplanar = true
+	m.uv1_triplanar_sharpness = 0.82
+	m.uv1_scale = Vector3(tile_scale, tile_scale, tile_scale)
+	m.roughness = 0.84
+	m.metallic = 0.0
+	return m
+
+
+func _make_parcel_pad_material(albedo_tex: Texture2D, uv_scale: Vector3) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.22, 0.21, 0.23)
+	_apply_floor_texture_rules(m, albedo_tex, uv_scale)
+	m.roughness = 0.94
+	m.metallic = 0.0
+	return m
+
+
 func _make_curb_material(albedo_tex: Texture2D, uv_scale: Vector3) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.albedo_color = Color(0.24, 0.24, 0.26)
@@ -236,29 +259,154 @@ func _add_street_ramp(
 	parent.add_child(body)
 
 
-func _street_corridor_half(street_half_w: float, curb_w: float, sidewalk_w: float) -> Dictionary:
-	var inner := street_half_w + curb_w * 0.5
-	var walk_center := inner + curb_w * 0.5 + sidewalk_w * 0.5
+## Overlap onto parcel pads at the lot line (collision + no trench).
+const SIDEWALK_PARCEL_LAP_M: float = 0.06
+## Walk surface slightly above curb crown.
+const SIDEWALK_TOP_LIP_M: float = 0.008
+## Curb root sits this far below asphalt top so it reads embedded in the lane edge.
+const CURB_EMBED_BELOW_ROAD_M: float = 0.015
+
+
+## Single source for horizontal bands (m from origin) and vertical grades (world Y).
+func _build_street_layer_profile(
+	street_half_w: float,
+	curb_w: float,
+	curb_h: float,
+	sidewalk_w: float,
+	road_slab_h: float
+) -> Dictionary:
+	var road_top := 0.0
+	var road_cy := road_top - road_slab_h * 0.5
+	var curb_bottom := road_top - CURB_EMBED_BELOW_ROAD_M
+	var curb_top := curb_bottom + curb_h
+	var curb_center := street_half_w + curb_w * 0.5
+	var curb_outer := curb_center + curb_w * 0.5
+	var walk_inner := curb_outer
+	var walk_center := walk_inner + sidewalk_w * 0.5
 	var corridor_half := walk_center + sidewalk_w * 0.5
-	return {"inner": inner, "walk_center": walk_center, "corridor_half": corridor_half}
+	var sidewalk_bottom := road_top
+	var sidewalk_top := curb_top + SIDEWALK_TOP_LIP_M
+	var sidewalk_slab_h := clampf(sidewalk_top - sidewalk_bottom, 0.08, road_slab_h)
+	var sidewalk_cy := sidewalk_bottom + sidewalk_slab_h * 0.5
+	return {
+		"road_top": road_top,
+		"road_cy": road_cy,
+		"road_slab_h": road_slab_h,
+		"curb_w": curb_w,
+		"curb_h": curb_h,
+		"curb_y": curb_bottom + curb_h * 0.5,
+		"curb_top": curb_top,
+		"curb_center": curb_center,
+		"curb_outer": curb_outer,
+		"walk_inner": walk_inner,
+		"walk_center": walk_center,
+		"corridor_half": corridor_half,
+		"parcel_inner": corridor_half,
+		"sidewalk_w": sidewalk_w,
+		"sidewalk_slab_h": sidewalk_slab_h,
+		"sidewalk_cy": sidewalk_cy,
+		"sidewalk_top": sidewalk_top,
+		"sidewalk_bottom": sidewalk_bottom,
+		# Legacy alias used by curb mesh placement.
+		"inner": curb_center,
+	}
 
 
-## One CSG slab (sidewalk + building pads) with a cross-shaped cutout; asphalt sits in the hole flush at y=0.
-## Avoids hundreds of coplanar sidewalk tiles (Z-fight) and fixes tessellation gaps from strip builds.
+## Shared layout for sidewalk meshes and plinth boolean cuts (one source of truth).
+func _collect_sidewalk_strips(street_len: float, street_half_w: float, profile: Dictionary) -> Array:
+	var strips: Array = []
+	var lane_hw := street_half_w
+	var half_len := street_len * 0.5
+	var arm_ns := half_len - lane_hw
+	if arm_ns <= 0.05:
+		return strips
+	var sw: float = profile["sidewalk_w"]
+	var walk_center: float = profile["walk_center"]
+	var lap := SIDEWALK_PARCEL_LAP_M
+	var sw_mesh := sw + lap
+	var slab_h: float = profile["sidewalk_slab_h"]
+	var walk_y: float = profile["sidewalk_cy"]
+	var arm_half := arm_ns * 0.5
+	var corner_stop := walk_center + sw * 0.5
+	var z_south := -(half_len + lane_hw) * 0.5
+	var z_north := (half_len + lane_hw) * 0.5
+	var x_west := -(half_len + lane_hw) * 0.5
+	var x_east := (half_len + lane_hw) * 0.5
+
+	var _append_ns := func(p_name: String, x: float, parcel_sign: float, z_tip: float, z_stop: float) -> void:
+		var seg_len := absf(z_stop - z_tip)
+		if seg_len <= 0.05:
+			return
+		strips.append({
+			"name": p_name,
+			"size": Vector3(sw_mesh, slab_h, seg_len),
+			"pos": Vector3(x + parcel_sign * lap * 0.5, walk_y, (z_tip + z_stop) * 0.5),
+		})
+
+	var _append_ew := func(p_name: String, z: float, parcel_sign: float, x_tip: float, x_stop: float) -> void:
+		var seg_len := absf(x_stop - x_tip)
+		if seg_len <= 0.05:
+			return
+		strips.append({
+			"name": p_name,
+			"size": Vector3(seg_len, slab_h, sw_mesh),
+			"pos": Vector3((x_tip + x_stop) * 0.5, walk_y, z + parcel_sign * lap * 0.5),
+		})
+
+	# parcel_sign: shift slab outward (away from street) onto the lot pad.
+	_append_ns.call("Sidewalk_NS_S_W", -walk_center, -1.0, z_south - arm_half, -corner_stop)
+	_append_ns.call("Sidewalk_NS_S_E", walk_center, 1.0, z_south - arm_half, -corner_stop)
+	_append_ns.call("Sidewalk_NS_N_W", -walk_center, -1.0, z_north + arm_half, corner_stop)
+	_append_ns.call("Sidewalk_NS_N_E", walk_center, 1.0, z_north + arm_half, corner_stop)
+	_append_ew.call("Sidewalk_EW_W_S", -walk_center, -1.0, x_west - arm_half, -corner_stop)
+	_append_ew.call("Sidewalk_EW_W_N", walk_center, 1.0, x_west - arm_half, -corner_stop)
+	_append_ew.call("Sidewalk_EW_E_S", -walk_center, 1.0, x_east + arm_half, corner_stop)
+	_append_ew.call("Sidewalk_EW_E_N", walk_center, 1.0, x_east + arm_half, corner_stop)
+	for q in ["NE", "NW", "SE", "SW"]:
+		var sx_sign := 1.0 if q[1] == "E" else -1.0
+		var sz_sign := 1.0 if q[0] == "N" else -1.0
+		strips.append({
+			"name": "Sidewalk_IX_%s" % q,
+			"size": Vector3(sw_mesh, slab_h, sw_mesh),
+			"pos": Vector3(
+				sx_sign * walk_center + sx_sign * lap * 0.5,
+				walk_y,
+				sz_sign * walk_center + sz_sign * lap * 0.5
+			),
+		})
+	return strips
+
+
+func _add_plinth_sidewalk_cutouts(
+	comb: CSGCombiner3D,
+	plinth_cy: float,
+	plinth_thick: float,
+	strips: Array
+) -> void:
+	var cut_h := plinth_thick + 0.6
+	for strip in strips:
+		var s: Vector3 = strip["size"]
+		var p: Vector3 = strip["pos"]
+		var cut := CSGBox3D.new()
+		cut.operation = CSGShape3D.OPERATION_SUBTRACTION
+		# Match walk mesh exactly — wider cuts dug a collisionless trench at the lot line.
+		cut.size = Vector3(s.x, cut_h, s.z)
+		cut.position = Vector3(p.x, p.y - plinth_cy, p.z)
+		comb.add_child(cut)
+
+
+## Recessed parcel pads (dark) with cross-shaped road + sidewalk cutouts; asphalt flush at y≈0.
 func _build_town_square_plinth_and_roads(
 	parent: Node3D,
 	street_len: float,
-	slab_h: float,
-	curb_h: float,
-	curb_w: float,
-	inner: float,
 	street_half_w: float,
-	corridor_half: float,
+	profile: Dictionary,
 	parcel_extent: float,
 	asphalt: Material,
 	curb_mat: Material,
 	plinth_mat: Material
 ) -> void:
+	var corridor_half: float = profile["corridor_half"]
 	var town_half := corridor_half + parcel_extent + 4.0
 	var plinth_thick := 0.34
 	var plinth_cy := -plinth_thick * 0.5
@@ -266,8 +414,12 @@ func _build_town_square_plinth_and_roads(
 	var lane_w := lane_hw * 2.0
 	var half_len := street_len * 0.5
 	var arm_ns := half_len - lane_hw
-	var road_cy := -slab_h * 0.5
-	var curb_y := curb_h * 0.5 - 0.015
+	var road_cy: float = profile["road_cy"]
+	var slab_h: float = profile["road_slab_h"]
+	var curb_y: float = profile["curb_y"]
+	var curb_h: float = profile["curb_h"]
+	var curb_w: float = profile["curb_w"]
+	var inner: float = profile["curb_center"]
 
 	var comb := CSGCombiner3D.new()
 	comb.name = "TownSquarePlinth"
@@ -288,6 +440,8 @@ func _build_town_square_plinth_and_roads(
 	comb.add_child(outer)
 	comb.add_child(sub_ns)
 	comb.add_child(sub_ew)
+	var sw_strips := _collect_sidewalk_strips(street_len, street_half_w, profile)
+	_add_plinth_sidewalk_cutouts(comb, plinth_cy, plinth_thick, sw_strips)
 	parent.add_child(comb)
 
 	_add_street_box(parent, "StreetAsphalt_IX", Vector3(lane_w, slab_h, lane_w), Vector3(0.0, road_cy, 0.0), asphalt)
@@ -308,6 +462,18 @@ func _build_town_square_plinth_and_roads(
 		_add_street_box(parent, "CurbNorth_EW_W", Vector3(arm_ns, curb_h, curb_w), Vector3(x_west, curb_y, inner), curb_mat)
 		_add_street_box(parent, "CurbSouth_EW_E", Vector3(arm_ns, curb_h, curb_w), Vector3(x_east, curb_y, -inner), curb_mat)
 		_add_street_box(parent, "CurbNorth_EW_E", Vector3(arm_ns, curb_h, curb_w), Vector3(x_east, curb_y, inner), curb_mat)
+
+
+## Raised concrete strips; layout matches plinth cutouts from _collect_sidewalk_strips.
+func _build_sidewalk_corridor(
+	parent: Node3D,
+	street_len: float,
+	street_half_w: float,
+	profile: Dictionary,
+	mat: Material
+) -> void:
+	for strip in _collect_sidewalk_strips(street_len, street_half_w, profile):
+		_add_street_box(parent, strip["name"], strip["size"], strip["pos"], mat)
 
 
 func _place_building_mock(parent: Node3D, world_x: float, world_z: float, yaw_deg: float) -> void:
@@ -331,21 +497,22 @@ func _build_street_layout(root: Node3D) -> void:
 
 	var tex_asphalt := _make_floor_grit_texture(0xA511A1)
 	var tex_walk := _make_floor_grit_texture(0x51DEA1)
+	var tex_parcel := _make_floor_grit_texture(0x31A902)
 	var tex_curb := _make_floor_grit_texture(0xC0B4E)
 	var asphalt := _make_wet_asphalt_material(tex_asphalt, Vector3(52, 52, 52))
-	var concrete := _make_dark_concrete_material(tex_walk, Vector3(34, 34, 34))
+	var sidewalk := _make_sidewalk_concrete_material(tex_walk)
+	var parcel_pad := _make_parcel_pad_material(tex_parcel, Vector3(40, 40, 40))
 	var curb_mat := _make_curb_material(tex_curb, Vector3(10, 6, 120))
 
-	# Enlarged corridor vs original strip; arms span entire mock block.
+	# Sidewalk corridor width (m); arms span entire mock block.
 	var street_half_w := 6.5
 	var curb_w := 0.22
 	var curb_h := 0.16
-	var sidewalk_w := 11.0
+	var sidewalk_w := 3.5
 	var slab_h := 0.22
 
-	var co := _street_corridor_half(street_half_w, curb_w, sidewalk_w)
-	var inner: float = co["inner"]
-	var corridor_half: float = co["corridor_half"]
+	var profile := _build_street_layer_profile(street_half_w, curb_w, curb_h, sidewalk_w, slab_h)
+	var corridor_half: float = profile["corridor_half"]
 
 	var street_len := 132.0
 	var parcel_extent := 44.0
@@ -353,30 +520,29 @@ func _build_street_layout(root: Node3D) -> void:
 	_build_town_square_plinth_and_roads(
 		street_root,
 		street_len,
-		slab_h,
-		curb_h,
-		curb_w,
-		inner,
 		street_half_w,
-		corridor_half,
+		profile,
 		parcel_extent,
 		asphalt,
 		curb_mat,
-		concrete
+		parcel_pad
 	)
 
-	# Bone-block mock buildings (simple CSG cubes from Building_Base.tscn).
-	var inset := 9.0
-	var d1 := 7.0
-	var d2 := 15.0
-	_place_building_mock(buildings_root, corridor_half + inset, corridor_half + d1, 0.0)
-	_place_building_mock(buildings_root, corridor_half + d2, corridor_half + inset, 90.0)
-	_place_building_mock(buildings_root, -(corridor_half + inset), corridor_half + d1, 0.0)
-	_place_building_mock(buildings_root, -(corridor_half + d2), corridor_half + inset, -90.0)
-	_place_building_mock(buildings_root, corridor_half + d1, -(corridor_half + inset), 180.0)
-	_place_building_mock(buildings_root, corridor_half + d2, -(corridor_half + inset), 90.0)
-	_place_building_mock(buildings_root, -(corridor_half + d1), -(corridor_half + inset), 180.0)
-	_place_building_mock(buildings_root, -(corridor_half + d2), -(corridor_half + inset), -90.0)
+	_build_sidewalk_corridor(street_root, street_len, street_half_w, profile, sidewalk)
+
+	# Bone-block mock buildings (8×6 m footprint in Building_Base.tscn). Two per block form an L;
+	# offsets must satisfy d_corner > inset + 7 and inset > d_along + 7 (half-extents) or corners overlap.
+	var inset := 20.0
+	var d_along := 8.0
+	var d_corner := 34.0
+	_place_building_mock(buildings_root, corridor_half + inset, corridor_half + d_along, 0.0)
+	_place_building_mock(buildings_root, corridor_half + d_corner, corridor_half + inset, 90.0)
+	_place_building_mock(buildings_root, -(corridor_half + inset), corridor_half + d_along, 0.0)
+	_place_building_mock(buildings_root, -(corridor_half + d_corner), corridor_half + inset, -90.0)
+	_place_building_mock(buildings_root, corridor_half + d_along, -(corridor_half + inset), 180.0)
+	_place_building_mock(buildings_root, corridor_half + d_corner, -(corridor_half + inset), 90.0)
+	_place_building_mock(buildings_root, -(corridor_half + d_along), -(corridor_half + inset), 180.0)
+	_place_building_mock(buildings_root, -(corridor_half + d_corner), -(corridor_half + inset), -90.0)
 
 	_add_street_ramp(
 		street_root,
