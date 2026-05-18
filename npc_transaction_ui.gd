@@ -7,63 +7,68 @@ signal player_inventory_pressed
 signal talk_pressed
 
 var _title_label: Label = null
+var _panel: Panel = null
+var _content_vbox: VBoxContainer = null
+var _panel_sb: StyleBoxFlat = null
 
 
 func _ready() -> void:
 	visible = false
-	# Let clicks pass through outside the panel (no fullscreen dim / modal blocker).
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	set_anchors_preset(Control.PRESET_FULL_RECT)
-	offset_left = 0.0
-	offset_top = 0.0
-	offset_right = 0.0
-	offset_bottom = 0.0
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
-	var panel := Panel.new()
-	panel.mouse_filter = Control.MOUSE_FILTER_STOP
-	# Default theme Panel is a flat gray fill — replace with transparent + outline only.
-	var panel_sb := StyleBoxFlat.new()
-	panel_sb.bg_color = Color(0, 0, 0, 0)
-	panel_sb.border_width_left = 2
-	panel_sb.border_width_top = 2
-	panel_sb.border_width_right = 2
-	panel_sb.border_width_bottom = 2
-	panel_sb.border_color = Color(0.42, 0.36, 0.18, 1.0)
-	panel.add_theme_stylebox_override("panel", panel_sb)
-	panel.anchor_left = 0.5
-	panel.anchor_top = 0.5
-	panel.anchor_right = 0.5
-	panel.anchor_bottom = 0.5
-	panel.offset_left = -172.0
-	panel.offset_top = -118.0
-	panel.offset_right = 172.0
-	panel.offset_bottom = 118.0
-	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(center)
 
-	var margin := MarginContainer.new()
-	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
-	margin.add_theme_constant_override("margin_left", 14)
-	margin.add_theme_constant_override("margin_top", 14)
-	margin.add_theme_constant_override("margin_right", 14)
-	margin.add_theme_constant_override("margin_bottom", 14)
-	panel.add_child(margin)
+	_panel = Panel.new()
+	_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	_panel_sb = StyleBoxFlat.new()
+	_panel_sb.bg_color = Color(0, 0, 0, 0)
+	_panel_sb.border_width_left = 2
+	_panel_sb.border_width_top = 2
+	_panel_sb.border_width_right = 2
+	_panel_sb.border_width_bottom = 2
+	_panel_sb.border_color = Color(0.42, 0.36, 0.18, 1.0)
+	_panel_sb.content_margin_left = 12
+	_panel_sb.content_margin_top = 10
+	_panel_sb.content_margin_right = 12
+	_panel_sb.content_margin_bottom = 10
+	_panel.add_theme_stylebox_override("panel", _panel_sb)
+	center.add_child(_panel)
 
-	var vbox := VBoxContainer.new()
-	vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
-	vbox.add_theme_constant_override("separation", 8)
-	margin.add_child(vbox)
+	_content_vbox = VBoxContainer.new()
+	_content_vbox.add_theme_constant_override("separation", 6)
+	_content_vbox.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	_content_vbox.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	_panel.add_child(_content_vbox)
 
 	_title_label = Label.new()
 	_title_label.text = "> Cliente"
 	_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vbox.add_child(_title_label)
+	_title_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_title_label.custom_minimum_size.x = 200.0
+	_content_vbox.add_child(_title_label)
 
-	vbox.add_child(_make_btn("[ CART INVENTORY ]", func() -> void: cart_inventory_pressed.emit()))
-	vbox.add_child(_make_btn("[ PLAYER INVENTORY ]", func() -> void: player_inventory_pressed.emit()))
-	vbox.add_child(_make_btn("[ TALK ]", func() -> void: talk_pressed.emit()))
+	_content_vbox.add_child(_make_btn("[ CART INVENTORY ]", func() -> void: cart_inventory_pressed.emit()))
+	_content_vbox.add_child(_make_btn("[ PLAYER INVENTORY ]", func() -> void: player_inventory_pressed.emit()))
+	_content_vbox.add_child(_make_btn("[ TALK ]", func() -> void: talk_pressed.emit()))
 
-	add_child(panel)
+	call_deferred("_fit_npc_terminal_panel_size")
+
+
+func _fit_npc_terminal_panel_size() -> void:
+	if _panel == null or _content_vbox == null or _panel_sb == null:
+		return
+	await get_tree().process_frame
+	var ms: Vector2 = _content_vbox.get_combined_minimum_size()
+	if ms.x < 2.0 or ms.y < 2.0:
+		return
+	_panel.custom_minimum_size = Vector2(
+		ms.x + _panel_sb.content_margin_left + _panel_sb.content_margin_right,
+		ms.y + _panel_sb.content_margin_top + _panel_sb.content_margin_bottom
+	)
 
 
 func _make_btn(txt: String, on_press: Callable) -> Button:
@@ -81,6 +86,7 @@ func open_terminal(character_name: String = "") -> void:
 			n = "Cliente"
 		_title_label.text = "> %s" % n
 	visible = true
+	call_deferred("_fit_npc_terminal_panel_size")
 
 
 func close_terminal() -> void:

@@ -51,7 +51,7 @@ const PICKUP_NEAR_DIST: float = 2.6
 @export var cart_jump_sync_window_sec: float = 0.24
 ## Upward follow gain during jump-sync window (align cart vy to player vy).
 @export var cart_jump_vertical_follow_gain: float = 165.0
-## Small grace window so jump keys off player grounding even during push-contact jitter.
+## Coyote time for normal jumps only (not used while pushing a cart).
 @export var player_jump_coyote_sec: float = 0.12
 var gravity = ProjectSettings.get_setting("physics/3d/default_gravity")
 
@@ -251,10 +251,12 @@ func _physics_process(delta: float) -> void:
 
 	var can_jump := player_grounded or _player_jump_coyote_t > 0.0
 	if is_pushing:
-		can_jump = current_cart != null \
-			and is_instance_valid(current_cart) \
-			and current_cart.has_method("can_player_jump") \
-			and current_cart.can_player_jump()
+		var cart_grounded := false
+		if current_cart != null and is_instance_valid(current_cart) \
+				and current_cart.has_method("can_player_jump"):
+			cart_grounded = current_cart.can_player_jump()
+		# Both bodies must be on the ground — no coyote while pushing.
+		can_jump = player_grounded and cart_grounded
 	if Input.is_action_just_pressed("jump") and can_jump:
 		if is_pushing and current_cart != null and is_instance_valid(current_cart):
 			# Trigger cart launch immediately on jump press so it "starts" the hop a touch earlier.

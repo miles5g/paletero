@@ -4,6 +4,7 @@ extends RigidBody3D
 ## Cart physics (grabbed + free). All “feel” tuning lives in these exports.
 ## Player applies planar coupling in player.gd; this script only handles body
 ## integration extras: yaw toward camera, roll/pitch stability, light grounding.
+## Roll (lean L/R) is damped on local Z; pitch on local X — see _integrate_forces.
 ## =============================================================================
 
 ## --- Yaw (camera vs cart heading) — torque only, no offset wheel forces ---
@@ -12,6 +13,11 @@ extends RigidBody3D
 @export var yaw_max_torque: float = 460.0
 ## Damp rotation around body X (pitch) so the nose does not dive while pushing forward.
 @export var pitch_stabilize_gain: float = 19.0
+## Damp rotation around body Z (roll) — lateral lean while pushing / after steer snaps.
+@export var roll_stabilize_gain: float = 24.0
+## Pull body Y back toward world up around local Z (0 = rate damping only).
+@export var roll_upright_gain: float = 58.0
+@export var roll_upright_max_torque: float = 150.0
 ## Camera pitch → cart nose up/down (torque on local X). Weaker than yaw: lower strength + track_scale < 1.
 @export var pitch_aim_track_scale: float = 0.28
 @export var pitch_aim_strength: float = 72.0
@@ -36,12 +42,12 @@ extends RigidBody3D
 ## --- Heavy impact feedback (simple layer-2 structural check) ---
 @export var impact_layer_2_min_speed: float = 5.8
 @export var impact_feedback_cooldown_sec: float = 0.18
-## Jump gating lives on the cart so the player keys off cart support, not body contacts.
+## Jump gating: cart must be touching ground (contacts or short support ray).
 @export var jump_ground_normal_min_dot: float = 0.35
-@export var jump_coyote_sec: float = 0.12
 ## Hull-local start / cast length for ground ray (works when Jolt reports 0 contacts in integrate).
 @export var jump_support_ray_local_y: float = -0.08
-@export var jump_support_ray_length: float = 2.35
+## Max downward cast — keep small so airborne carts do not latch distant floor.
+@export var jump_support_ray_length: float = 0.42
 
 var _handle_zone: Area3D
 var _interaction_area: Area3D
@@ -55,7 +61,6 @@ var _steer_rope_cb_debug: MeshInstance3D = null
 var _steer_rope_cb_length_label: Label3D = null
 var _impact_feedback_cd_t: float = 0.0
 var _jump_grounded: bool = false
-var _jump_coyote_t: float = 0.0
 
 var inventory_list: Array[ItemResource] = []
 
@@ -306,6 +311,20 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 		bx = bx.normalized()
 		var pitch_rate := av.dot(bx)
 		state.apply_torque(-bx * pitch_rate * pitch_stabilize_gain)
+	# Roll: steer-lock XZ snaps and yaw on offset wheel contacts build lean; no roll term existed before.
+	var bz := state.transform.basis.z
+	if bz.length_squared() > 1e-8:
+		bz = bz.normalized()
+		var roll_rate := av.dot(bz)
+		state.apply_torque(-bz * roll_rate * roll_stabilize_gain)
+		if roll_upright_gain > 0.0:
+			var right := state.transform.basis.x
+			if right.length_squared() > 1e-8:
+				right = right.normalized()
+				var roll_lean := right.dot(Vector3.UP)
+				if absf(roll_lean) > 0.002:
+					var tq := clampf(-roll_lean * roll_upright_gain, -roll_upright_max_torque, roll_upright_max_torque)
+					state.apply_torque(bz * tq)
 	if _impact_feedback_cd_t > 0.0:
 		_impact_feedback_cd_t = maxf(0.0, _impact_feedback_cd_t - state.step)
 	_maybe_emit_heavy_impact_feedback(state, player)
@@ -351,18 +370,12 @@ func _update_jump_support_state(state: PhysicsDirectBodyState3D) -> void:
 	if not grounded:
 		grounded = _contacts_support_jump(state)
 	_jump_grounded = grounded
-	if grounded:
-		_jump_coyote_t = jump_coyote_sec
-	else:
-		_jump_coyote_t = maxf(0.0, _jump_coyote_t - state.step)
 
 
 func can_player_jump() -> bool:
-	if _jump_coyote_t > 0.0:
-		return true
 	if _jump_grounded:
 		return true
-	# Player._physics_process can run before this body's integrate step for this tick; ray uses current pose.
+	# Player._physics_process can run before integrate; short ray only — no coyote / long fallbacks.
 	var w := get_world_3d()
 	if w == null:
 		return false
