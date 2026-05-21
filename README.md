@@ -1,5 +1,7 @@
 # El Paletero
 
+**Portfolio project:** first-person urban vending prototype in **Godot 4** — physics-driven cart, procedural city block, and NPC transaction loop.
+
 A gritty first-person urban vending prototype in **Godot 4** — push a physics-driven paleta cart through a low-poly city block, serve NPC customers, and manage inventory under PS2-era presentation.
 
 ## Key concepts (portfolio)
